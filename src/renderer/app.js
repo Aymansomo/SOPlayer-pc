@@ -30335,6 +30335,368 @@ function bindCoverHoldZoom(wrapEl) {
   })();
 
   // -------------------------------------------------------------------------
+  // Cloud account (Supabase): sign in once, the collection follows you to any PC
+  // -------------------------------------------------------------------------
+  (function initCloudAccountSync() {
+    const api = window.electronAPI;
+    if (!api || typeof api.accountStatus !== 'function') return;
+
+    const cloudEl = (id) => document.getElementById(id);
+    const els = {
+      status: cloudEl('cloud-account-status'),
+      dot: cloudEl('cloud-account-dot'),
+      signin: cloudEl('cloud-account-signin-item'),
+      signedin: cloudEl('cloud-account-signedin-item'),
+      email: cloudEl('cloud-account-email'),
+      password: cloudEl('cloud-account-password'),
+      signInBtn: cloudEl('btn-cloud-sign-in'),
+      signUpBtn: cloudEl('btn-cloud-sign-up'),
+      resetBtn: cloudEl('btn-cloud-reset'),
+      message: cloudEl('cloud-account-message'),
+      who: cloudEl('cloud-account-who'),
+      lastSync: cloudEl('cloud-account-last-sync'),
+      syncBtn: cloudEl('btn-cloud-sync-now'),
+      signOutBtn: cloudEl('btn-cloud-sign-out'),
+      url: cloudEl('cloud-account-url'),
+      key: cloudEl('cloud-account-key'),
+      saveConfig: cloudEl('btn-cloud-save-config'),
+      configStatus: cloudEl('cloud-account-config-status'),
+    };
+    if (!els.status) return;
+
+    // Mirrors keyForTrack() in src/server/mobile/collection.js so a track keeps
+    // one identity across the phone sync, the cloud and both PCs.
+    function cloudTrackKey(track) {
+      if (!track) return '';
+      const platform = String(track.platform || '').toLowerCase();
+      const id = track.id != null ? String(track.id) : '';
+      if (platform === 'local' || track.path) {
+        if (track.path) return 'local:' + String(track.path).replace(/\\/g, '/').toLowerCase();
+        if (id) return 'local:' + id;
+      }
+      if (platform === 'soundcloud' && id) return 'soundcloud:' + id;
+      if ((platform === 'youtube' || platform === 'ytmusic' || platform === 'yt' || !platform) && id) {
+        return 'youtube:' + id;
+      }
+      if (id) return platform + ':' + id;
+      if (track.url) return 'url:' + String(track.url).toLowerCase();
+      return '';
+    }
+
+    let status = { signedIn: false, configured: false };
+    let syncing = false;
+    let lastApplied = '';
+
+    // Cheap fingerprint: nothing is pushed while the collection is unchanged.
+    function cloudSignature() {
+      const parts = [];
+      for (const pl of state.playlists || []) {
+        parts.push('p' + (pl && pl.id) + '|' + (pl && pl.name));
+        for (const track of (pl && pl.tracks) || []) parts.push(cloudTrackKey(track));
+      }
+      for (const track of state.favorites || []) parts.push('f' + cloudTrackKey(track));
+      return parts.join('\u0001');
+    }
+
+    function showMessage(text, isError) {
+      if (!els.message) return;
+      if (!text) {
+        els.message.style.display = 'none';
+        els.message.textContent = '';
+        return;
+      }
+      els.message.style.display = '';
+      els.message.textContent = text;
+      els.message.style.color = isError ? '#ffb4ab' : '';
+    }
+
+    function formatWhen(ts) {
+      if (!ts) return 'Never synced.';
+      try {
+        return 'Last synced ' + new Date(ts).toLocaleString();
+      } catch (_) {
+        return 'Last synced just now.';
+      }
+    }
+
+    function renderStatus() {
+      const signedIn = !!(status && status.signedIn);
+      if (els.signin) els.signin.style.display = signedIn ? 'none' : '';
+      if (els.signedin) els.signedin.style.display = signedIn ? '' : 'none';
+      if (els.dot) {
+        els.dot.style.background = signedIn
+          ? '#7ee787'
+          : (status && status.configured ? 'var(--md-sys-color-outline)' : '#ffb86b');
+      }
+      if (els.status) {
+        if (signedIn) {
+          els.status.textContent = status.syncing
+            ? 'Syncing…'
+            : 'Signed in. Playlists and likes sync across your PCs.';
+        } else if (status && status.configured) {
+          els.status.textContent = 'Not signed in. Playlists and likes stay on this PC.';
+        } else {
+          els.status.textContent = 'Cloud sync is not set up. Open Supabase project below.';
+        }
+      }
+      if (els.who) els.who.textContent = (status && status.email) || '';
+      if (els.lastSync) {
+        els.lastSync.textContent = (status && status.lastError)
+          ? status.lastError
+          : formatWhen(status && status.lastSyncAt);
+        els.lastSync.style.color = status && status.lastError ? '#ffb4ab' : '';
+      }
+      if (els.url && document.activeElement !== els.url && status && status.url) els.url.value = status.url;
+    }
+
+    function refreshStatus() {
+      return api.accountStatus().then((next) => {
+        status = next || status;
+        renderStatus();
+        return status;
+      }).catch(() => status);
+    }
+
+    // Replaces the local collection with the merged one the main process
+    // computed. Local objects are kept where they exist, so covers and any
+    // field the cloud does not carry survive the round trip.
+    function applyCloudCollection(result) {
+      if (!result || !result.ok) return false;
+      const nextPlaylists = Array.isArray(result.playlists) ? result.playlists : [];
+      const nextFavorites = Array.isArray(result.favorites) ? result.favorites : [];
+      const hadPlaylists = (state.playlists || []).length;
+      if (!nextPlaylists.length && hadPlaylists > 0) return false;
+
+      const before = new Map((state.playlists || []).map((pl) => [String(pl.id), pl]));
+      state.playlists = nextPlaylists.map((pl) => {
+        const previous = before.get(String(pl.id));
+        if (!previous) return pl;
+        return Object.assign({}, previous, pl, {
+          cover: pl.cover || previous.cover || '',
+          tracks: Array.isArray(pl.tracks) ? pl.tracks : previous.tracks,
+        });
+      });
+      localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
+
+      const favoriteByIdentity = new Map();
+      for (const track of nextFavorites) {
+        const key = cloudTrackKey(track);
+        if (key) favoriteByIdentity.set(key, track);
+      }
+      const existingFavs = new Map();
+      for (const track of state.favorites || []) {
+        const key = cloudTrackKey(track);
+        if (key) existingFavs.set(key, track);
+      }
+      state.favorites = nextFavorites.map((track) => {
+        const key = cloudTrackKey(track);
+        return (key && existingFavs.get(key)) || track;
+      });
+      localStorage.setItem('devsize_favorites', JSON.stringify(state.favorites));
+
+      if (state.currentPlaylistId) {
+        state.currentPlaylist = state.playlists.find((pl) => pl.id === state.currentPlaylistId) || state.currentPlaylist;
+      }
+
+      try { if (typeof renderPlaylistsList === 'function') renderPlaylistsList(); } catch (_) {}
+      try { if (typeof updateFavoritesBadge === 'function') updateFavoritesBadge(); } catch (_) {}
+      try {
+        if (state.currentView === 'favorites' && typeof renderFavoritesView === 'function') renderFavoritesView();
+      } catch (_) {}
+      try {
+        if (state.currentView === 'playlist-detail' && typeof openPlaylistDetail === 'function' && state.currentPlaylistId) {
+          openPlaylistDetail(state.currentPlaylistId);
+        }
+      } catch (_) {}
+      return true;
+    }
+
+    function runSync(force) {
+      if (!status || !status.signedIn) return Promise.resolve(false);
+      if (syncing) return Promise.resolve(false);
+      const signature = cloudSignature();
+      if (!force && signature === lastApplied) return Promise.resolve(false);
+
+      syncing = true;
+      status.syncing = true;
+      renderStatus();
+      return api.accountSync({
+        playlists: state.playlists || [],
+        favorites: state.favorites || [],
+        allowPurge: (state.playlists || []).length > 0,
+      }).then((res) => {
+        syncing = false;
+        status.syncing = false;
+        if (!res || !res.ok) {
+          if (res && res.busy) return false;
+          showMessage((res && res.error) || 'Sync failed.', true);
+          refreshStatus();
+          return false;
+        }
+        applyCloudCollection(res);
+        lastApplied = cloudSignature();
+        refreshStatus();
+        return true;
+      }).catch((err) => {
+        syncing = false;
+        status.syncing = false;
+        showMessage((err && err.message) || 'Sync failed.', true);
+        renderStatus();
+        return false;
+      });
+    }
+    window.__riffCloudSync = () => runSync(true);
+
+    if (els.signInBtn) {
+      els.signInBtn.addEventListener('click', async () => {
+        const email = els.email ? els.email.value.trim() : '';
+        const password = els.password ? els.password.value : '';
+        if (!email || !password) {
+          showMessage('Enter your email and password.', true);
+          return;
+        }
+        els.signInBtn.disabled = true;
+        showMessage('Signing in…');
+        try {
+          const res = await api.accountSignIn({ email, password });
+          if (!res || !res.ok) {
+            showMessage((res && res.error) || 'Could not sign in.', true);
+            return;
+          }
+          if (els.password) els.password.value = '';
+          showMessage('Signed in. Syncing your playlists…');
+          status = res.status || (await refreshStatus());
+          renderStatus();
+          lastApplied = '';
+          await runSync(true);
+          showMessage('Your collection is up to date.');
+        } finally {
+          els.signInBtn.disabled = false;
+        }
+      });
+    }
+
+    if (els.signUpBtn) {
+      els.signUpBtn.addEventListener('click', async () => {
+        const email = els.email ? els.email.value.trim() : '';
+        const password = els.password ? els.password.value : '';
+        if (!email || !password) {
+          showMessage('Enter your email and a password (at least 6 characters).', true);
+          return;
+        }
+        els.signUpBtn.disabled = true;
+        showMessage('Creating account…');
+        try {
+          const res = await api.accountSignUp({ email, password });
+          if (!res || !res.ok) {
+            showMessage((res && res.error) || 'Could not create the account.', true);
+            return;
+          }
+          if (res.needsConfirmation) {
+            showMessage(res.message || 'Confirm your email, then sign in.');
+            refreshStatus();
+            return;
+          }
+          if (els.password) els.password.value = '';
+          showMessage('Account created. Uploading your playlists…');
+          status = res.status || (await refreshStatus());
+          renderStatus();
+          lastApplied = '';
+          await runSync(true);
+          showMessage('Your collection is now in the cloud.');
+        } finally {
+          els.signUpBtn.disabled = false;
+        }
+      });
+    }
+
+    if (els.resetBtn) {
+      els.resetBtn.addEventListener('click', () => {
+        const email = els.email ? els.email.value.trim() : '';
+        if (!email) {
+          showMessage('Enter your email first.', true);
+          return;
+        }
+        showMessage('Sending reset link…');
+        api.accountResetPassword(email).then((res) => {
+          showMessage((res && (res.message || res.error)) || 'Reset link sent.', !(res && res.ok));
+        }).catch((err) => showMessage((err && err.message) || 'Could not send the reset link.', true));
+      });
+    }
+
+    if (els.syncBtn) {
+      els.syncBtn.addEventListener('click', async () => {
+        els.syncBtn.disabled = true;
+        showMessage('Syncing…');
+        try {
+          const ok = await runSync(true);
+          if (ok) showMessage('Synced just now.');
+          else if (!status || !status.signedIn) {
+            showMessage(status && status.configured
+              ? 'Sign in first, then sync.'
+              : 'Save your Supabase project URL and anon key first.', true);
+          }
+        } finally {
+          els.syncBtn.disabled = false;
+        }
+      });
+    }
+
+    if (els.signOutBtn) {
+      els.signOutBtn.addEventListener('click', async () => {
+        els.signOutBtn.disabled = true;
+        try {
+          status = (await api.accountSignOut()) || { signedIn: false };
+          lastApplied = '';
+          showMessage('Signed out. Your playlists stay on this PC.');
+          renderStatus();
+        } finally {
+          els.signOutBtn.disabled = false;
+        }
+      });
+    }
+
+    if (els.saveConfig) {
+      els.saveConfig.addEventListener('click', async () => {
+        const url = els.url ? els.url.value.trim() : '';
+        const key = els.key ? els.key.value.trim() : '';
+        if (!/^https?:\/\//i.test(url)) {
+          if (els.configStatus) els.configStatus.textContent = 'Project URL looks wrong.';
+          return;
+        }
+        if (els.configStatus) els.configStatus.textContent = 'Saving…';
+        status = (await api.accountConfigure({ url, key })) || status;
+        if (els.configStatus) {
+          els.configStatus.textContent = status && status.configured
+            ? 'Saved. Now sign in.'
+            : 'Add both the URL and the anon key.';
+        }
+        renderStatus();
+      });
+    }
+
+    document.querySelectorAll('#settings-nav .settings-nav-btn[data-cat="account"]').forEach((btn) => {
+      btn.addEventListener('click', () => { refreshStatus().then((st) => { if (st && st.signedIn) runSync(false); }); });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      refreshStatus().then(() => runSync(false));
+    });
+
+    refreshStatus().then((st) => {
+      if (st && st.signedIn) setTimeout(() => runSync(false), 4000);
+    });
+    setInterval(() => {
+      if (document.hidden) return;
+      if (!status || !status.signedIn) {
+        refreshStatus();
+        return;
+      }
+      runSync(false);
+    }, 60000);
+  })();
+
+  // -------------------------------------------------------------------------
   // Phone remote control bridge (Phase 5)
   // -------------------------------------------------------------------------
   (function initPhoneRemoteBridge() {
@@ -32054,7 +32416,10 @@ function bindCoverHoldZoom(wrapEl) {
     const originalBtnHtml = btn ? btn.innerHTML : 'Check for updates';
     let manualUpdateCheck = false;
     let checkTimeoutId = null;
-    let fallbackReleaseUrl = 'https://github.com/rootscripts/riff/releases/latest';
+    const releaseRepo = 'Aymansomo/SOPlayer-pc';
+    const releasesApi = `https://api.github.com/repos/${releaseRepo}/releases/latest`;
+    const releasesPage = `https://github.com/${releaseRepo}/releases/latest`;
+    let fallbackReleaseUrl = releasesPage;
     let canNativeInstall = false;
 
     let latestUpdateInfo = null;
@@ -32177,13 +32542,13 @@ function bindCoverHoldZoom(wrapEl) {
           showToast('Could not check for updates', 'error');
           return;
         }
-        const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-          headers: { 'User-Agent': 'Riff-Player' }
+        const res = await fetch(releasesApi, {
+          headers: { 'User-Agent': 'SOPlayer' }
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = await res.json();
         const latestVersion = (json.tag_name || '').replace(/^v/i, '');
-        fallbackReleaseUrl = json.html_url || 'https://github.com/rootscripts/riff/releases/latest';
+        fallbackReleaseUrl = json.html_url || releasesPage;
         if (isNewerVersion(latestVersion, currentAppVersion)) {
           latestUpdateInfo = {
             version: latestVersion,
@@ -32246,8 +32611,8 @@ function bindCoverHoldZoom(wrapEl) {
 
         if (!hasImg || !hasPublishedAt) {
           try {
-            const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-              headers: { 'User-Agent': 'Riff-Player' }
+            const res = await fetch(releasesApi, {
+              headers: { 'User-Agent': 'SOPlayer' }
             });
             if (res.ok) {
               const gh = await res.json();

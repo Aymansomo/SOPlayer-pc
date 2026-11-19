@@ -13,3 +13,17 @@ yt-cookies.txt
 .yt-logged-out
 *.log
 .DS_Store
+
+# Android/mobile apps live elsewhere; this repo is the PC build only.
+Navic/
+MyApps/
+apps/
+.gitmodules
+.github/workflows/android-apk.yml
+
+# Local build output / stray files that must never be uploaded.
+**/.gradle/
+**/build/
+**/local.properties
+codedatabase.txt
+png

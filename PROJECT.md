@@ -625,3 +625,57 @@ No Navic source files are modified at any point.
   `{isCurrent, isPaused}` with `distinctUntilChanged`, so song rows no longer
   recompose five times a second while the progress loop runs. Queue lookups in
   gesture callbacks read `player.uiState.value` directly.
+
+---
+
+## 16. Cloud account (Supabase) — playlists follow you between PCs
+
+Signing in is optional; without it everything behaves exactly as before.
+
+### One-time setup
+
+1. Create a free project at supabase.com.
+2. Open **SQL Editor**, paste all of `supabase/schema.sql`, press **Run**.
+3. **Authentication → Providers → Email**: "Confirm email" on means one click
+   in your inbox after sign-up; off means sign-in works immediately.
+4. **Project Settings → API**: copy the **Project URL** and the **anon public**
+   key.
+5. In SOPlayer: **Settings → Account → Supabase project**, paste both, **Save**,
+   then **Create account** or **Sign in**.
+
+### What syncs
+
+| Travels to Supabase | Stays on the PC |
+| --- | --- |
+| playlist names, order, description | audio files and streams |
+| one row per song: its identity (`youtube:<id>`, `soundcloud:<id>`, `local:<path>`) + title/artist/album/duration/thumbnail/path | artwork blobs, downloads, caches |
+| likes | Daily Mixes, playback state, file paths as identity |
+
+The row count is tiny: 500 songs ≈ 30 KB, so a whole library is a few MB against
+the free plan's 500 MB. A `local:<path>` song only plays on a machine that has
+that file; elsewhere the row still shows its title and artist.
+
+### Behaviour
+
+- Sync runs when you sign in, when the window regains focus, every 60 s, and on
+  **Sync now**; it is skipped entirely while the collection is unchanged.
+- Pull → merge → push happens in one SQL transaction, so a dropped connection
+  cannot leave half a library behind.
+- An empty local collection only *adopts* cloud playlists — it never deletes
+  them. A deletion becomes a tombstone only for a playlist that synced before
+  and only while other playlists still exist locally.
+- Signing out keeps your local library as it is.
+- Tokens are encrypted with Electron `safeStorage`
+  (`%LOCALAPPDATA%\Riff\account-session.bin`); the project URL and anon key sit
+  in `%LOCALAPPDATA%\Riff\account.json`. Nothing account-related goes into
+  `storage.json`/`localStorage`.
+- The phone is unchanged: Navic still connects to this PC as a Subsonic server
+  and streams/downloads from it. The PC pushes the same collection it always
+  did, now backed by your account.
+
+### Code
+
+`src/main/account.js` (auth + sync), `src/main/account/merge.js` (pure merge
+rules), `src/main/main.js` + `src/main/preload.js` (`account-*` IPC),
+`src/renderer/app.js` (`initCloudAccountSync`), `supabase/schema.sql`,
+`test/account-merge.test.js`.

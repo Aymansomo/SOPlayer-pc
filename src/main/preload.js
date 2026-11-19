@@ -121,6 +121,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readCacheFile: () => ipcRenderer.invoke('cache-read'),
   writeCacheFile: (data) => ipcRenderer.send('cache-write', data),
 
+  // Cloud account (Supabase): sign in once, playlists follow you to any PC
+  accountStatus: () => ipcRenderer.invoke('account-status'),
+  accountConfigure: (patch) => ipcRenderer.invoke('account-configure', patch),
+  accountSignIn: (creds) => ipcRenderer.invoke('account-sign-in', creds),
+  accountSignUp: (creds) => ipcRenderer.invoke('account-sign-up', creds),
+  accountSignOut: () => ipcRenderer.invoke('account-sign-out'),
+  accountResetPassword: (email) => ipcRenderer.invoke('account-reset-password', email),
+  accountSync: (payload) => ipcRenderer.invoke('account-sync', payload),
+
   // Phone / Navic (Subsonic) server
   getMobileConfig: () => ipcRenderer.invoke('mobile-get-config'),
   setMobileConfig: (patch) => ipcRenderer.invoke('mobile-set-config', patch),

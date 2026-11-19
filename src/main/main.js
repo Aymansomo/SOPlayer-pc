@@ -18,7 +18,7 @@ const {
 } = require('./google-oauth');
 const { fetchYouTubeLibrary } = require('./youtube-data');
 const RFACC_KEY = crypto.createHash('sha256').update('riff-account-key-v1').digest();
-const APP_ID = 'io.github.rootscripts.riff';
+const APP_ID = 'io.github.Aymansomo.soplayer-pc';
 const IS_MAC = process.platform === 'darwin';
 
 // Keep the historical data folder name so settings, logins and the library
@@ -55,6 +55,7 @@ const { getSystemAudioOutputInfo } = require('../shared/audio-output');
 const { log, tail, LOG_DIR } = require('../shared/logger');
 const logger = { log, tail, LOG_DIR, error: (msg, err) => log('ERROR', `${msg}: ${err && err.message ? err.message : err}`) };
 const mobile = require('../server/mobile');
+const account = require('./account');
 
 try {
   if (process.stdout && typeof process.stdout.on === 'function') process.stdout.on('error', () => {});
@@ -527,6 +528,11 @@ function runGUI() {
   // ---------------------------------------------------------------------
   // Phone / Navic (Subsonic) settings
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Cloud account (Supabase): email + password, metadata-only sync
+  // ---------------------------------------------------------------------
+  account.register(ipcMain);
+
   ipcMain.removeHandler('mobile-get-config');
   ipcMain.removeHandler('mobile-set-config');
   ipcMain.removeHandler('mobile-regenerate-password');

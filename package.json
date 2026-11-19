@@ -31,16 +31,16 @@
     "tone": "^15.1.22"
   },
   "productName": "SOPlayer",
-  "homepage": "https://github.com/rootscripts/riff",
+  "homepage": "https://github.com/Aymansomo/SOPlayer-pc",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/rootscripts/riff.git"
+    "url": "git+https://github.com/Aymansomo/SOPlayer-pc.git"
   },
   "bugs": {
-    "url": "https://github.com/rootscripts/riff/issues"
+    "url": "https://github.com/Aymansomo/SOPlayer-pc/issues"
   },
   "build": {
-    "appId": "io.github.rootscripts.riff",
+    "appId": "io.github.Aymansomo.soplayer-pc",
     "productName": "SOPlayer",
     "artifactName": "${productName}-${version}-${os}-${arch}-setup.${ext}",
     "directories": {
@@ -110,8 +110,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "rootscripts",
-        "repo": "riff",
+        "owner": "Aymansomo",
+        "repo": "SOPlayer-pc",
         "releaseType": "release"
       }
     ],

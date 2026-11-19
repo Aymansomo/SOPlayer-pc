@@ -1735,6 +1735,57 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </div>
 
               <div class="settings-section cat-hidden" data-cat="account" id="settings-section-account">
+                <div class="m3-group" id="cloud-account-group">
+                  <div class="setting-item">
+                    <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
+                      <div style="display: flex; flex-direction: column; gap: 2px;">
+                        <span class="setting-name" data-i18n-fixed>SOPlayer account (cloud sync)</span>
+                        <span class="setting-hint" id="cloud-account-status" data-i18n-fixed>Not signed in. Playlists and likes stay on this PC.</span>
+                      </div>
+                      <span id="cloud-account-dot" style="width: 9px; height: 9px; border-radius: 50%; background: var(--md-sys-color-outline); flex-shrink: 0;"></span>
+                    </div>
+                  </div>
+
+                  <div class="setting-item" id="cloud-account-signin-item">
+                    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+                      <span class="setting-hint" data-i18n-fixed>Sign in on any PC and your playlists and likes come back with their songs. Audio files are never uploaded: a song plays where the file lives.</span>
+                      <input id="cloud-account-email" type="email" autocomplete="username" placeholder="Email" style="padding: 10px 12px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface-container-high); color: inherit; font: inherit; width: 100%;" />
+                      <input id="cloud-account-password" type="password" autocomplete="current-password" placeholder="Password" style="padding: 10px 12px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface-container-high); color: inherit; font: inherit; width: 100%;" />
+                      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn-pill-primary" id="btn-cloud-sign-in">Sign in</button>
+                        <button type="button" class="btn-outline-pill" id="btn-cloud-sign-up">Create account</button>
+                        <button type="button" class="btn-outline-pill" id="btn-cloud-reset">Forgot password</button>
+                      </div>
+                      <span class="setting-hint" id="cloud-account-message" style="display: none;"></span>
+                    </div>
+                  </div>
+
+                  <div class="setting-item" id="cloud-account-signedin-item" style="display: none;">
+                    <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
+                      <span class="setting-name" style="font-size: calc(14px * var(--font-scale, 1));" id="cloud-account-who"></span>
+                      <span class="setting-hint" id="cloud-account-last-sync">Never synced.</span>
+                      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn-pill-primary" id="btn-cloud-sync-now">Sync now</button>
+                        <button type="button" class="btn-outline-pill" id="btn-cloud-sign-out">Sign out</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="setting-item">
+                    <details id="cloud-account-config" style="width: 100%;">
+                      <summary style="cursor: pointer; font-size: calc(13px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Supabase project (one-time setup)</summary>
+                      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 12px;">
+                        <input id="cloud-account-url" type="url" placeholder="https://xxxx.supabase.co" style="padding: 10px 12px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface-container-high); color: inherit; font: inherit; width: 100%;" />
+                        <input id="cloud-account-key" type="text" placeholder="anon public key" style="padding: 10px 12px; border-radius: 12px; border: 1px solid var(--md-sys-color-outline-variant); background: var(--md-sys-color-surface-container-high); color: inherit; font: inherit; width: 100%;" />
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                          <button type="button" class="btn-outline-pill" id="btn-cloud-save-config">Save</button>
+                          <span class="setting-hint" id="cloud-account-config-status"></span>
+                        </div>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+
                 <div class="tg-account-hero" id="tg-account-hero">
                   <div class="tg-account-pattern" aria-hidden="true">
                     <span class="tg-pat-icon p1"></span>

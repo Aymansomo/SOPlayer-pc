@@ -34,7 +34,12 @@ function initUpdater(getWindow) {
   if (pkg.version) {
     app.setVersion(pkg.version);
   }
-  const releasesUrl = `${pkg.homepage || 'https://github.com/rootscripts/riff'}/releases`;
+  // Point the updater at this fork's own releases, never at upstream Riff.
+  const repoMatch = String(pkg.homepage || (pkg.repository && pkg.repository.url) || '')
+    .match(/github\.com[/:]([^/]+)\/([^/.#]+)/i);
+  const repo = repoMatch ? `${repoMatch[1]}/${repoMatch[2]}` : 'Aymansomo/SOPlayer-pc';
+  const repoUrl = `https://github.com/${repo}`;
+  const releasesUrl = `${repoUrl}/releases`;
   let manualCheck = false;
   let installNow = false;
   let current = null;
@@ -75,7 +80,7 @@ function initUpdater(getWindow) {
         resetTimer();
         const res = await fetch(url, {
           signal: controller.signal,
-          headers: { 'User-Agent': 'Riff-Player' }
+          headers: { 'User-Agent': 'SOPlayer' }
         });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -169,8 +174,8 @@ function initUpdater(getWindow) {
 
   const checkViaGithubApi = async () => {
     try {
-      const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-        headers: { 'User-Agent': 'Riff-Player' }
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { 'User-Agent': 'SOPlayer' }
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const json = await res.json();
@@ -252,8 +257,8 @@ function initUpdater(getWindow) {
         let htmlUrl = `${releasesUrl}/tag/v${info.version}`;
 
         try {
-          const res = await fetch('https://api.github.com/repos/rootscripts/riff/releases/latest', {
-            headers: { 'User-Agent': 'Riff-Player' }
+          const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+            headers: { 'User-Agent': 'SOPlayer' }
           });
           if (res.ok) {
             const json = await res.json();
