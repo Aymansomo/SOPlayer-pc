@@ -1546,6 +1546,14 @@ function flushAsync() {
     window.electronAPI.storageSaveBatch(diskMap);
   }, 200);
 }
+// Playlist/favourite edits should reach Supabase without waiting for the
+// 60-second poll. The cloud module debounces this and skips no-op syncs.
+function notifyCloudDataChange(key) {
+  if (key !== 'devsize_playlists' && key !== 'devsize_favorites') return;
+  try {
+    if (typeof window.__riffCloudSyncSoon === 'function') window.__riffCloudSyncSoon();
+  } catch (_) {}
+}
 window.addEventListener('beforeunload', () => {
   if (flushTimer) {
     clearTimeout(flushTimer);
@@ -1569,6 +1577,7 @@ const v = String(val);
 if (diskMap[k] === v) return;
 diskMap[k] = v;
 flushAsync();
+notifyCloudDataChange(k);
 return;
 }
 origSet.call(this, key, val);
@@ -1580,6 +1589,7 @@ const k = String(key);
 if (Object.prototype.hasOwnProperty.call(diskMap, k)) {
 delete diskMap[k];
 flushAsync();
+notifyCloudDataChange(k);
 }
 return;
 }
@@ -30434,9 +30444,9 @@ function bindCoverHoldZoom(wrapEl) {
             ? 'Syncing…'
             : 'Signed in. Playlists and likes sync across your PCs.';
         } else if (status && status.configured) {
-          els.status.textContent = 'Not signed in. Playlists and likes stay on this PC.';
+          els.status.textContent = 'Not signed in. Create an account or sign in below to sync automatically.';
         } else {
-          els.status.textContent = 'Cloud sync is not set up. Open Supabase project below.';
+          els.status.textContent = 'Cloud sync is not set up. Restart the app.';
         }
       }
       if (els.who) els.who.textContent = (status && status.email) || '';
@@ -30547,6 +30557,18 @@ function bindCoverHoldZoom(wrapEl) {
     }
     window.__riffCloudSync = () => runSync(true);
 
+    // Debounced auto-sync: called by the storage daemon as soon as a playlist
+    // or favourite is written. runSync() skips the round trip when nothing
+    // actually changed, so saving unrelated settings stays cheap.
+    let cloudSyncTimer = null;
+    window.__riffCloudSyncSoon = () => {
+      if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+      cloudSyncTimer = setTimeout(() => {
+        cloudSyncTimer = null;
+        runSync(false);
+      }, 1500);
+    };
+
     if (els.signInBtn) {
       els.signInBtn.addEventListener('click', async () => {
         const email = els.email ? els.email.value.trim() : '';
@@ -30632,9 +30654,7 @@ function bindCoverHoldZoom(wrapEl) {
           const ok = await runSync(true);
           if (ok) showMessage('Synced just now.');
           else if (!status || !status.signedIn) {
-            showMessage(status && status.configured
-              ? 'Sign in first, then sync.'
-              : 'Save your Supabase project URL and anon key first.', true);
+            showMessage('Sign in first, then sync.', true);
           }
         } finally {
           els.syncBtn.disabled = false;
