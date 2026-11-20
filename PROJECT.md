@@ -169,6 +169,11 @@ tiny status route.
   the normal session. The code is shown even while phone access is off: it then
   encodes this PC's LAN address and the saved port, so pairing works before the
   listener is switched on.
+- **Phone library auto-sync**: while phone access is running,
+  `src/server/mobile/index.js` rescans the configured music folders 10 seconds
+  after start and every 5 minutes after that, so songs added on the PC reach
+  Navic without pressing **Rescan library**. Scans are incremental; unchanged
+  files reuse their cached metadata.
 - **Offline content survives syncs**: `SongDao` and `AlbumDao` never delete a
   row that still has a `DOWNLOADED` copy, and `PlaylistDao` keeps every playlist
   listed in `downloadedPlaylists`, and `DbRepository.syncPlaylistSongs` merges

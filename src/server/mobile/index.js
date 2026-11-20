@@ -33,6 +33,13 @@ let lastError = '';
 let currentPort = 0;
 let currentHost = '';
 let trendingTimer = null;
+let libraryTimer = null;
+let libraryFirstScanTimer = null;
+
+// Rescan the music folders on a timer so songs added on the PC show up in Navic
+// without pressing "Rescan library". Scans reuse cached metadata for files whose
+// size and mtime did not change, so an unchanged library costs one folder walk.
+const AUTO_SCAN_INTERVAL_MS = 5 * 60 * 1000;
 
 const STATIC_DIR = path.join(__dirname, 'public');
 
@@ -339,6 +346,7 @@ function start() {
       console.log(`[mobile] Subsonic server listening on ${currentHost}:${currentPort}`);
       if (urls.length) console.log(`[mobile] phone URL: ${urls[0]}`);
       startTrendingRefresh();
+      startAutoScan();
       // Warm the taste mixes too; this also fills the online collection with
       // the day's recommendations before the phone asks for them.
       try { collection.playlists(); } catch (_) {}
@@ -368,8 +376,33 @@ function stopTrendingRefresh() {
   trendingTimer = null;
 }
 
+/** Keep the phone library index current while the listener is running. */
+function startAutoScan() {
+  if (libraryTimer) return;
+  const tick = () => { library.startScan().catch(() => {}); };
+  // Let the initial scan started at boot finish first.
+  libraryFirstScanTimer = setTimeout(() => {
+    libraryFirstScanTimer = null;
+    if (running) tick();
+  }, 10 * 1000);
+  if (libraryFirstScanTimer.unref) libraryFirstScanTimer.unref();
+  libraryTimer = setInterval(tick, AUTO_SCAN_INTERVAL_MS);
+  if (libraryTimer.unref) libraryTimer.unref();
+}
+
+function stopAutoScan() {
+  if (libraryFirstScanTimer) {
+    clearTimeout(libraryFirstScanTimer);
+    libraryFirstScanTimer = null;
+  }
+  if (!libraryTimer) return;
+  clearInterval(libraryTimer);
+  libraryTimer = null;
+}
+
 function stop() {
   stopTrendingRefresh();
+  stopAutoScan();
   return new Promise((resolve) => {
     if (!server) {
       running = false;

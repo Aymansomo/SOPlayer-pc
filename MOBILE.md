@@ -173,7 +173,10 @@ Nothing else from Riff's data folder is exposed.
 
 - The default is the project music folder:
   `E:\ayman\Development\My_progicte\ME\Music_app\project\music`
-- Add your songs there yourself, then press **Rescan library** in Riff.
+- Add your songs there yourself; Riff rescans the folders automatically
+  10 seconds after phone access starts and every 5 minutes after that, so you
+  do not have to press **Rescan library** (the button is still there for an
+  immediate scan).
 - Scanning is incremental: only new or changed files are read with `ffprobe`.
 - Tags (title, artist, album, track, year, genre) are used when present;
   filenames are the fallback.
@@ -265,6 +268,20 @@ up in Riff on the PC, and what you star or create in Riff shows up in Navic.
   though the PC itself pushed nothing new.
 - If you have phone access turned off, nothing is sent to the phone; Riff's own
   likes stay exactly as they are.
+
+---
+
+## Home-screen widgets
+
+Two widgets are available in the launcher's widget picker:
+
+- **Mini Player** — cover, title and artist with previous / play-pause / next.
+- **Turn Table** — round cover with play-pause and a star button for the
+  current song.
+
+Both follow what is playing in Navic (including when the song changes, not just
+play/pause), keep the last song visible when the app is in the background or the
+widget is added again, and their buttons control playback in the app.
 
 ---
 
