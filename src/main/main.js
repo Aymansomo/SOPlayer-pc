@@ -8,6 +8,7 @@ const { pathToFileURL } = url;
 const { spawn, execFile } = require('child_process');
 const crypto = require('crypto');
 const zlib = require('zlib');
+const QRCode = require('qrcode');
 const {
   createCodeVerifier,
   createCodeChallenge,
@@ -35,6 +36,23 @@ function encryptAccount(dataObj) {
   const tag = cipher.getAuthTag();
   const header = Buffer.from('RFAC');
   return Buffer.concat([header, iv, tag, encrypted]);
+}
+
+// First usable IPv4 LAN address of this PC, used to build the Navic login QR
+// when the phone listener is still off.
+function lanUrlForPhone(port) {
+  const preferred = /wi-?fi|wlan|ethernet|eth/i;
+  let best = null;
+  const nets = os.networkInterfaces();
+  for (const [name, list] of Object.entries(nets)) {
+    for (const net of list || []) {
+      if (net.family !== 'IPv4' || net.internal) continue;
+      const candidate = { name, address: net.address };
+      if (preferred.test(name)) return `http://${candidate.address}:${port || 6767}`;
+      if (!best) best = candidate;
+    }
+  }
+  return best ? `http://${best.address}:${port || 6767}` : '';
 }
 
 function decryptAccount(buffer) {
@@ -534,6 +552,7 @@ function runGUI() {
   account.register(ipcMain);
 
   ipcMain.removeHandler('mobile-get-config');
+  ipcMain.removeHandler('mobile-login-qr');
   ipcMain.removeHandler('mobile-set-config');
   ipcMain.removeHandler('mobile-regenerate-password');
   ipcMain.removeHandler('mobile-status');
@@ -551,6 +570,36 @@ function runGUI() {
     config: mobile.getConfig(),
     status: mobile.getStatus(),
   }));
+
+  // Login without typing: Navic scans this code and gets URL, user and password.
+  ipcMain.handle('mobile-login-qr', async () => {
+    const config = mobile.getConfig();
+    const status = mobile.getStatus();
+    const first = status && status.running && Array.isArray(status.urls) ? status.urls[0] : null;
+    // Phone access can be off while the user still wants to pair: the code then
+    // points at this PC's LAN address and the saved port, which works as soon
+    // as the listener is switched on.
+    const url = (first && first.url) || lanUrlForPhone(config.port);
+    if (!url) {
+      return { ok: false, error: 'No LAN address found. Connect this PC to Wi-Fi or Ethernet.' };
+    }
+    const payload = JSON.stringify({
+      app: 'soplayer',
+      url,
+      username: config.username,
+      password: config.password,
+    });
+    try {
+      const dataUrl = await QRCode.toDataURL(payload, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 360,
+      });
+      return { ok: true, dataUrl, url, running: !!(status && status.running) };
+    } catch (err) {
+      return { ok: false, error: (err && err.message) || String(err) };
+    }
+  });
 
   ipcMain.handle('mobile-set-config', async (event, patch) => {
     const safePatch = patch && typeof patch === 'object' ? patch : {};

@@ -25,7 +25,9 @@ The full technical overview lives in [PROJECT.md](PROJECT.md).
    (or use **Add firewall rule** in the settings, which asks for administrator
    permission once).
 5. Copy the **server URL**, **username** and **password** shown in the settings.
-6. On the phone open Navic → **Servers → Add server** and paste:
+6. On the phone open Navic → **Servers → Add server**. Tap **Scan QR code** in
+   Navic and scan the code in Riff → Settings → Phone & Navic to fill everything
+   automatically, or paste:
    - **Server URL:** `http://192.168.x.x:6767`
    - **Username** and **password** from Riff
    - Leave the rest at default.
@@ -250,6 +252,11 @@ up in Riff on the PC, and what you star or create in Riff shows up in Navic.
   screen, not in your Playlists list.
 - A download that hits a busy PC retries by itself, so you do not have to tap
   download a second time.
+- **Downloaded music is never removed by a sync.** If you delete a playlist or
+  its songs on the PC, the phone keeps its downloaded copy (and its album page)
+  and plays it offline. Its songs stay in the playlist even when the PC no
+  longer returns them, and opening a playlist the PC has deleted shows the
+  saved songs instead of an error.
 - Playlist songs you added only on the PC are adopted into the phone's online
   collection, so a shared playlist lists them instead of showing `0 songs`.
   Imported Spotify tracks have no video id, so the phone looks the song up on

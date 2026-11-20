@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Phone / Navic (Subsonic) server
   getMobileConfig: () => ipcRenderer.invoke('mobile-get-config'),
+  getMobileLoginQr: () => ipcRenderer.invoke('mobile-login-qr'),
   setMobileConfig: (patch) => ipcRenderer.invoke('mobile-set-config', patch),
   regenerateMobilePassword: () => ipcRenderer.invoke('mobile-regenerate-password'),
   getMobileStatus: () => ipcRenderer.invoke('mobile-status'),

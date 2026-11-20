@@ -161,6 +161,21 @@ tiny status route.
 ### Navic (Android client)
 
 - `Navic/` — client source, built and installed from here.
+- **QR login**: Navic's login screen has a *Scan QR code* button
+  (`com.journeyapps:zxing-android-embedded`). It reads a JSON code
+  `{"app":"soplayer","url","username","password"}` that Riff renders in
+  **Settings → Phone & Navic** (generated with the `qrcode` npm package in the
+  main process), fills the three fields and logs in. Nothing is stored beyond
+  the normal session. The code is shown even while phone access is off: it then
+  encodes this PC's LAN address and the saved port, so pairing works before the
+  listener is switched on.
+- **Offline content survives syncs**: `SongDao` and `AlbumDao` never delete a
+  row that still has a `DOWNLOADED` copy, and `PlaylistDao` keeps every playlist
+  listed in `downloadedPlaylists`, and `DbRepository.syncPlaylistSongs` merges
+  those saved songs into the server's list instead of replacing it. Deleting a
+  playlist or its songs on the PC therefore leaves the downloaded copy on the
+  phone intact (playable offline), and opening it succeeds even when the PC no
+  longer has it.
 - `npm run android:install` (`scripts/install-navic.js`) builds
   `:app:assembleDefaultDebug` and installs the APK with `adb` over USB or
   wireless debugging, so the APK never has to be copied to the phone by hand.
@@ -562,11 +577,14 @@ it is available and skips the transcoding checks otherwise.
    - **Server URL:** `http://<PC-LAN-IP>:6767` (shown in Riff settings)
    - **Username / password:** shown in Riff settings
    - Defaults for everything else.
-4. Tap **Test server** in Riff if unsure.
-5. Navic syncs artists/albums/songs automatically. Downloads made in Navic keep
+4. (Optional) In Navic's login screen tap **Scan QR code** and scan the code in
+   Riff → Settings → Phone & Navic; it fills the URL, username and password.
+5. Tap **Test server** in Riff if unsure.
+6. Navic syncs artists/albums/songs automatically. Downloads made in Navic keep
    working when the PC is off.
 
-No Navic source files are modified at any point.
+Navic is built from `Navic/`; the client carries the QR-pairing and offline-keep
+fixes described in §4.
 
 ---
 

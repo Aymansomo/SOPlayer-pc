@@ -29834,6 +29834,8 @@ function bindCoverHoldZoom(wrapEl) {
       password: document.getElementById('phone-password'),
       copyLogin: document.getElementById('btn-phone-copy-login'),
       regen: document.getElementById('btn-phone-regen-password'),
+      qrWrap: document.getElementById('phone-qr'),
+      qrImage: document.getElementById('phone-qr-image'),
       folders: document.getElementById('phone-folders-list'),
       addFolder: document.getElementById('btn-phone-add-folder'),
       libraryStatus: document.getElementById('phone-library-status'),
@@ -29879,6 +29881,37 @@ function bindCoverHoldZoom(wrapEl) {
       testMsg = message || '';
       testOk = !!ok;
       render();
+    }
+
+    // The QR is generated in the main process (it embeds the password) and only
+    // refreshed when the address or password it encodes actually changes.
+    let qrKey = '';
+    async function refreshLoginQr() {
+      if (!els.qrWrap || !els.qrImage || !api.getMobileLoginQr) return;
+      if (!config) {
+        qrKey = '';
+        els.qrWrap.style.display = 'none';
+        els.qrImage.removeAttribute('src');
+        return;
+      }
+      // The code is shown even while phone access is off; it then points at
+      // this PC's LAN address and starts working when the listener is on.
+      const key = `${primaryUrl() || 'off'}|${config.port || 6767}|${config.password}`;
+      if (key === qrKey) {
+        els.qrWrap.style.display = 'flex';
+        return;
+      }
+      qrKey = key;
+      try {
+        const res = await api.getMobileLoginQr();
+        if (res && res.ok && res.dataUrl) {
+          els.qrImage.src = res.dataUrl;
+          els.qrWrap.style.display = 'flex';
+          return;
+        }
+      } catch (_) {}
+      qrKey = '';
+      els.qrWrap.style.display = 'none';
     }
 
     function render() {
@@ -29965,6 +29998,8 @@ function bindCoverHoldZoom(wrapEl) {
           els.onlineStatus.textContent = 'On — search in Navic to find YouTube and SoundCloud songs.';
         }
       }
+
+      refreshLoginQr();
 
       const folders = Array.isArray(config.folders) ? config.folders : [];
       els.folders.innerHTML = '';
@@ -32489,7 +32524,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.11';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.12';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35779,7 +35814,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.11';
+    let appVer = '0.7.12';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
