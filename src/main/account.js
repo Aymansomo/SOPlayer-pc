@@ -11,7 +11,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const { safeStorage } = require('electron');
 const { DATA_DIR } = require('../shared/platform');
 const merge = require('./account/merge');
@@ -84,6 +83,9 @@ function loadState() {
     // copy back in, and "remove from playlist" undoes itself.
     knownItems,
     knownFavorites: Array.isArray(stored.knownFavorites) ? stored.knownFavorites.map(String) : [],
+    // Kept so Settings can still show the last sync time and error after a restart.
+    lastSyncAt: Number(stored.lastSyncAt) || 0,
+    lastError: String(stored.lastError || ''),
   };
   return state;
 }
@@ -423,7 +425,4 @@ module.exports = {
   resetPassword,
   sync,
   register,
-  // exposed for tests and diagnostics
-  _paths: { CONFIG_FILE, SESSION_FILE, STATE_FILE },
-  _crypto: crypto,
 };

@@ -46,12 +46,12 @@ function initUpdater(getWindow) {
   let manualCheck = false;
   let installNow = false;
   let current = null;
+  let isDownloaded = false;
 
   try { ipcMain.removeHandler('get-app-version'); } catch (_) {}
   ipcMain.handle('get-app-version', () => APP_VERSION);
 
   const isDev = !app.isPackaged;
-  const devConfigFile = path.join(__dirname, '../../dev-app-update.yml');
   const canInstall = !isDev && (process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE));
 
   const send = (channel, payload) => {
@@ -181,7 +181,8 @@ function initUpdater(getWindow) {
     try {
       const res = await fetch(`${repoUrl}/releases/latest`, {
         redirect: 'follow',
-        headers: { 'User-Agent': 'SOPlayer' }
+        headers: { 'User-Agent': 'SOPlayer' },
+        signal: AbortSignal.timeout(6000)
       });
       if (!res.ok) return '';
       const tag = String(res.url || '').split('/tag/')[1] || '';
@@ -191,14 +192,35 @@ function initUpdater(getWindow) {
     }
   };
 
+  /** The release asset that matches how this build was installed. */
+  function pickAsset(assets) {
+    const list = Array.isArray(assets) ? assets : [];
+    if (process.platform === 'win32') {
+      const exes = list.filter((a) => a.name && /\.exe$/i.test(a.name) && !/blockmap/i.test(a.name));
+      const portable = exes.find((a) => /portable/i.test(a.name));
+      const installer = exes.find((a) => !/portable/i.test(a.name));
+      return (process.env.PORTABLE_EXECUTABLE_FILE ? portable || installer : installer || portable) || null;
+    }
+    if (process.platform === 'linux' && process.env.APPIMAGE) {
+      return list.find((a) => a.name && /\.AppImage$/i.test(a.name)) || null;
+    }
+    return null;
+  }
+
+  /**
+   * The one place a version is decided: ask GitHub, then always answer. A manual
+   * click gets exactly one update-available / update-not-available / update-error.
+   */
   const checkViaGithubApi = async () => {
-    const currentVersion = APP_VERSION;
+    const wasManual = manualCheck;
+    manualCheck = false;
     let json = null;
     let latestVer = '';
     let apiError = '';
     try {
       const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-        headers: { 'User-Agent': 'SOPlayer' }
+        headers: { 'User-Agent': 'SOPlayer' },
+        signal: AbortSignal.timeout(6000)
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       json = await res.json();
@@ -209,136 +231,51 @@ function initUpdater(getWindow) {
 
     if (!latestVer) latestVer = await versionFromReleasesRedirect();
     if (!latestVer) {
-      if (manualCheck) {
+      if (wasManual) {
         send('update-error', {
           message: apiError === 'HTTP 403'
             ? 'GitHub rate limit reached - try again in a few minutes.'
             : `Could not reach GitHub (${apiError})`
         });
       }
-      manualCheck = false;
       return;
     }
 
-    if (isNewer(latestVer, currentVersion)) {
-        const assets = Array.isArray(json && json.assets) ? json.assets : [];
-        let matchedAsset = null;
-        if (process.platform === 'win32') {
-          const isPortable = !!process.env.PORTABLE_EXECUTABLE_FILE;
-          if (isPortable) {
-            matchedAsset = assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && /portable/i.test(a.name));
-          }
-          if (!matchedAsset) {
-            matchedAsset = assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && !/blockmap/i.test(a.name) && (isPortable ? true : !/portable/i.test(a.name)))
-              || assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && !/blockmap/i.test(a.name));
-          }
-        } else if (process.platform === 'linux' && process.env.APPIMAGE) {
-          matchedAsset = assets.find(a => a.name && a.name.endsWith('.AppImage'));
-        }
+    if (!isNewer(latestVer, APP_VERSION)) {
+      if (wasManual) send('update-not-available', { version: APP_VERSION });
+      return;
+    }
 
-        const canInstallFromAsset = (process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE)) && !!matchedAsset;
-
-        current = {
-          version: latestVer,
-          releaseNotes: json.body || '',
-          publishedAt: json.published_at || '',
-          htmlUrl: json.html_url || '',
-          assetUrl: matchedAsset ? matchedAsset.browser_download_url : null,
-          assetName: matchedAsset ? matchedAsset.name : null
-        };
-        const ignored = readIgnored(ignoreFile) === latestVer;
-        const wasManual = manualCheck;
-        manualCheck = false;
-        if (ignored && !wasManual) return;
-        send('update-available', {
-          version: latestVer,
-          releaseNotes: (json && json.body) || '',
-          publishedAt: (json && json.published_at) || '',
-          htmlUrl: (json && json.html_url) || `${releasesUrl}/tag/v${latestVer}`,
-          canInstall: canInstallFromAsset,
-          url: (json && json.html_url) || `${releasesUrl}/tag/v${latestVer}`
-        });
-      } else {
-        if (manualCheck) send('update-not-available', { version: currentVersion });
-        manualCheck = false;
-      }
+    const matchedAsset = pickAsset(json && json.assets);
+    current = {
+      version: latestVer,
+      releaseNotes: (json && json.body) || '',
+      publishedAt: (json && json.published_at) || '',
+      htmlUrl: (json && json.html_url) || `${releasesUrl}/tag/v${latestVer}`,
+      assetUrl: matchedAsset ? matchedAsset.browser_download_url : null,
+      assetName: matchedAsset ? matchedAsset.name : null
+    };
+    if (!wasManual && readIgnored(ignoreFile) === latestVer) return;
+    send('update-available', {
+      version: current.version,
+      releaseNotes: current.releaseNotes,
+      publishedAt: current.publishedAt,
+      htmlUrl: current.htmlUrl,
+      canInstall: canInstall && !!matchedAsset,
+      url: current.htmlUrl
+    });
   };
-  const fallbackFetchGitHub = checkViaGithubApi;
 
+  // Detection is checkViaGithubApi's job now; electron-updater is only the
+  // installer for a packaged Windows/Linux build.
   let autoUpdater = null;
-  const hasUpdaterSupport = !isDev || fs.existsSync(devConfigFile);
-  if (hasUpdaterSupport && canInstall) {
+  if (canInstall) {
     try {
       const eu = require('electron-updater');
       autoUpdater = eu.autoUpdater;
       autoUpdater.allowDowngrade = true;
-      if (isDev) autoUpdater.forceDevUpdateConfig = true;
       autoUpdater.autoDownload = false;
       autoUpdater.autoInstallOnAppQuit = false;
-
-      let isDownloaded = false;
-
-      autoUpdater.on('update-available', async (info) => {
-        current = info;
-        const ignored = readIgnored(ignoreFile) === info.version;
-        if (ignored && !manualCheck) return;
-        manualCheck = false;
-
-        let releaseNotes = info.releaseNotes || info.releaseName || '';
-        let publishedAt = info.releaseDate || '';
-        let htmlUrl = `${releasesUrl}/tag/v${info.version}`;
-
-        try {
-          const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-            headers: { 'User-Agent': 'SOPlayer' }
-          });
-          if (res.ok) {
-            const json = await res.json();
-            if (json.body) releaseNotes = json.body;
-            if (json.published_at) publishedAt = json.published_at;
-            if (json.html_url) htmlUrl = json.html_url;
-
-            const assets = Array.isArray(json.assets) ? json.assets : [];
-            let matchedAsset = null;
-            if (process.platform === 'win32') {
-              const isPortable = !!process.env.PORTABLE_EXECUTABLE_FILE;
-              if (isPortable) {
-                matchedAsset = assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && /portable/i.test(a.name));
-              }
-              if (!matchedAsset) {
-                matchedAsset = assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && !/blockmap/i.test(a.name) && (isPortable ? true : !/portable/i.test(a.name)))
-                  || assets.find(a => a.name && a.name.toLowerCase().endsWith('.exe') && !/blockmap/i.test(a.name));
-              }
-            } else if (process.platform === 'linux' && process.env.APPIMAGE) {
-              matchedAsset = assets.find(a => a.name && a.name.endsWith('.AppImage'));
-            }
-            if (matchedAsset) {
-              current.assetUrl = matchedAsset.browser_download_url;
-              current.assetName = matchedAsset.name;
-            }
-          }
-        } catch (_) {}
-
-        current.releaseNotes = releaseNotes;
-        current.publishedAt = publishedAt;
-        current.htmlUrl = htmlUrl;
-
-        send('update-available', {
-          version: info.version,
-          canInstall,
-          url: `${releasesUrl}/tag/v${info.version}`,
-          releaseNotes,
-          publishedAt,
-          htmlUrl
-        });
-
-        autoUpdater.downloadUpdate().catch(() => {});
-      });
-
-      autoUpdater.on('update-not-available', () => {
-        if (manualCheck) send('update-not-available', { version: app.getVersion() });
-        manualCheck = false;
-      });
 
       autoUpdater.on('download-progress', (p) => send('update-progress', { percent: Math.round(p.percent) }));
 
@@ -350,34 +287,26 @@ function initUpdater(getWindow) {
           send('update-ready', { version: current && current.version });
           send('update-downloaded', {
             version: current && current.version,
-            releaseNotes: current && (current.releaseNotes || current.body || ''),
-            publishedAt: current && (current.publishedAt || current.published_at || ''),
-            htmlUrl: current && (current.htmlUrl || current.html_url || ''),
+            releaseNotes: (current && current.releaseNotes) || '',
+            publishedAt: (current && current.publishedAt) || '',
+            htmlUrl: (current && current.htmlUrl) || '',
             canInstall: true
           });
         }
       });
 
-      autoUpdater.on('error', () => {
-        fallbackFetchGitHub();
-      });
+      // These are install/download errors: detection has already answered, but an
+      // unhandled 'error' event on the emitter would crash the process.
+      autoUpdater.on('error', () => {});
     } catch (_) {
       autoUpdater = null;
     }
   }
 
-  const check = () => {
-    // Always ask GitHub directly. electron-updater's own check needs
-    // app-update.yml inside the installed build and, when that or the network
-    // fails, a manual "Check for updates" click finished with no answer at all.
-    // Detection is the API's job now; electron-updater still installs.
-    return fallbackFetchGitHub();
-  };
-
   try { ipcMain.removeHandler('update-check'); } catch (_) {}
   ipcMain.handle('update-check', () => {
     manualCheck = true;
-    check();
+    checkViaGithubApi();
     return { ok: true };
   });
 
@@ -431,8 +360,8 @@ function initUpdater(getWindow) {
     }
   });
 
-  setTimeout(check, CHECK_DELAY_MS);
-  setInterval(check, CHECK_EVERY_MS).unref();
+  setTimeout(checkViaGithubApi, CHECK_DELAY_MS);
+  setInterval(checkViaGithubApi, CHECK_EVERY_MS).unref();
 }
 
 module.exports = { initUpdater };

@@ -32416,23 +32416,12 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.7.10';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.10' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
-        if (v) {
-          currentAppVersion = v;
-          const displayV = formatDisplayVer(v);
-          const a = $('about-version'); if (a) a.textContent = 'Version ' + displayV;
-          const t = document.querySelector('.settings-version-tag'); if (t) t.textContent = 'v' + displayV;
-        }
+        if (!v) return;
+        const a = $('about-version'); if (a) a.textContent = 'Version ' + v;
+        const t = document.querySelector('.settings-version-tag'); if (t) t.textContent = 'v' + v;
       }).catch(() => {});
-    } else {
-      const a = $('about-version');
-      if (a && a.textContent) {
-        const match = a.textContent.match(/[\d.]+/);
-        if (match) currentAppVersion = match[0];
-      }
     }
 
     const btn = $('btn-check-updates');
@@ -32440,10 +32429,6 @@ function bindCoverHoldZoom(wrapEl) {
     let manualUpdateCheck = false;
     let answeredByMain = false;
     let checkTimeoutId = null;
-    const releaseRepo = 'Aymansomo/SOPlayer-pc';
-    const releasesApi = `https://api.github.com/repos/${releaseRepo}/releases/latest`;
-    const releasesPage = `https://github.com/${releaseRepo}/releases/latest`;
-    let fallbackReleaseUrl = releasesPage;
     let canNativeInstall = false;
 
     let latestUpdateInfo = null;
@@ -32504,7 +32489,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.10';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.11';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -32546,53 +32531,6 @@ function bindCoverHoldZoom(wrapEl) {
       }
     }
 
-    function isNewerVersion(latest, current) {
-      const p1 = String(latest || '').split('.').map(n => parseInt(n, 10) || 0);
-      const p2 = String(current || '').split('.').map(n => parseInt(n, 10) || 0);
-      if (p2[0] >= 40 && p1[0] < 40) return true;
-      for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
-        const a = p1[i] || 0;
-        const b = p2[i] || 0;
-        if (a > b) return true;
-        if (a < b) return false;
-      }
-      return false;
-    }
-
-    async function checkDirectFromRenderer() {
-      try {
-        if (!navigator.onLine) {
-          restoreButton();
-          showToast('Could not check for updates', 'error');
-          return;
-        }
-        const res = await fetch(releasesApi, {
-          headers: { 'User-Agent': 'SOPlayer' }
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const json = await res.json();
-        const latestVersion = (json.tag_name || '').replace(/^v/i, '');
-        fallbackReleaseUrl = json.html_url || releasesPage;
-        if (isNewerVersion(latestVersion, currentAppVersion)) {
-          latestUpdateInfo = {
-            version: latestVersion,
-            releaseNotes: json.body || '',
-            publishedAt: json.published_at || '',
-            htmlUrl: fallbackReleaseUrl,
-            canInstall: false
-          };
-          populateOtaUpdateSheet(latestUpdateInfo);
-          restoreButton();
-        } else {
-          restoreButton();
-          showToast('You are using the latest version of SOPlayer!', 'success');
-        }
-      } catch (err) {
-        restoreButton();
-        showToast('Could not check for updates', 'error');
-      }
-    }
-
     if (btn) {
       btn.addEventListener('click', async () => {
         if (manualUpdateCheck) return;
@@ -32602,56 +32540,41 @@ function bindCoverHoldZoom(wrapEl) {
         btn.innerHTML = `<svg class="m3-btn-shape-spinner" style="width:16px;height:16px;margin-right:6px;" viewBox="-180 -180 360 360"><path fill="currentColor" d="${DEFAULT_SPINNER_SHAPE_PATH}"/></svg><span>Checking...</span>`;
 
         if (!api || !api.checkForUpdates) {
-          checkDirectFromRenderer();
+          restoreButton();
+          showToast('Update checks are unavailable in this build', 'error');
           return;
         }
 
+        // The main process always answers; this only stops a hung network call
+        // from leaving the button spinning forever.
         checkTimeoutId = setTimeout(() => {
-          // Only step in when the main process has not answered at all, so a
-          // slow-but-working check cannot show a second, contradictory result.
-          if (manualUpdateCheck && !answeredByMain) {
-            checkDirectFromRenderer();
+          if (!answeredByMain) {
+            restoreButton();
+            showToast('Could not check for updates', 'error');
           }
-        }, 2500);
+        }, 15000);
 
         try {
           const r = await api.checkForUpdates();
-          if (r && r.ok === false) {
-            if (checkTimeoutId) clearTimeout(checkTimeoutId);
-            checkDirectFromRenderer();
+          if (r && r.ok === false && !answeredByMain) {
+            restoreButton();
+            showToast('Could not check for updates', 'error');
           }
         } catch (_) {
-          if (checkTimeoutId) clearTimeout(checkTimeoutId);
-          checkDirectFromRenderer();
+          if (!answeredByMain) {
+            restoreButton();
+            showToast('Could not check for updates', 'error');
+          }
         }
       });
     }
 
     if (api && api.onUpdateAvailable) {
-      api.onUpdateAvailable(async (info) => {
+      api.onUpdateAvailable((info) => {
         answeredByMain = true;
         restoreButton();
         latestUpdateInfo = { ...(info || {}) };
         canNativeInstall = !!info?.canInstall;
-
-        const hasImg = latestUpdateInfo.releaseNotes && /<img/i.test(latestUpdateInfo.releaseNotes);
-        const hasPublishedAt = !!latestUpdateInfo.publishedAt;
-
-        if (!hasImg || !hasPublishedAt) {
-          try {
-            const res = await fetch(releasesApi, {
-              headers: { 'User-Agent': 'SOPlayer' }
-            });
-            if (res.ok) {
-              const gh = await res.json();
-              if (gh.body) latestUpdateInfo.releaseNotes = gh.body;
-              if (gh.published_at) latestUpdateInfo.publishedAt = gh.published_at;
-              if (gh.html_url) latestUpdateInfo.htmlUrl = gh.html_url;
-              if (gh.tag_name && !latestUpdateInfo.version) latestUpdateInfo.version = gh.tag_name;
-            }
-          } catch (_) {}
-        }
-
         populateOtaUpdateSheet(latestUpdateInfo);
       });
     }
@@ -35856,7 +35779,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.10';
+    let appVer = '0.7.11';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

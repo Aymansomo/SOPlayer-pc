@@ -149,10 +149,10 @@ function mergeCollections(local, remote, options) {
   const localFavorites = Array.isArray(local && local.favorites) ? local.favorites : [];
   const remoteFavorites = Array.isArray(remote && remote.favorites) ? remote.favorites : [];
   const knownIds = new Set((opts.knownIds || []).map(String));
-  // The caller owns the "is this a real collection or an empty/broken store?"
-  // question. A purge needs a real local library, or an explicit `allowPurge:
-  // true` from a renderer that knows the user just deleted the last playlist.
-  const allowPurge = opts.allowPurge !== false && (localPlaylists.length > 0 || opts.allowPurge === true);
+  // A purge needs a real local library. An empty one only purges when the caller
+  // passes `allowPurge: true`, i.e. the renderer knows the last playlist was just
+  // deleted on purpose.
+  const allowPurge = localPlaylists.length > 0 ? opts.allowPurge !== false : opts.allowPurge === true;
   const knownItems = opts.knownItems && typeof opts.knownItems === 'object' ? opts.knownItems : {};
   const knownFavorites = new Set((opts.knownFavorites || []).map(String));
 
@@ -212,9 +212,8 @@ function mergeCollections(local, remote, options) {
   if (allowPurge) {
     for (const id of knownIds) {
       if (present.has(id)) continue;
-      // A playlist that is gone locally but still live in the cloud is exactly
-      // a delete that has not reached Supabase yet. Skipping it here leaves the
-      // row active, so the next sync resurrects the playlist the user removed.
+      // Gone locally but still live in the cloud: this delete has not reached
+      // Supabase yet, so tombstone it or the next sync resurrects the playlist.
       const remotePl = remoteById.get(id);
       if (remotePl && remotePl.deleted) continue; // already tombstoned
       tombstones.push(id);
