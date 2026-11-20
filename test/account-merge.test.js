@@ -64,6 +64,35 @@ test('tombstones are pushed for local deletions but not for a reset', () => {
   assert.deepEqual(reset.tombstones, []);
 });
 
+test('deleting a playlist the cloud still has pushes a tombstone and does not resurrect it', () => {
+  const remote = {
+    playlists: [
+      { clientId: 'pl_keep', name: 'Kept', deleted: false, items: [] },
+      { clientId: 'pl_dead', name: 'Deleted locally', deleted: false, items: [{ key: 'youtube:a', title: 'A' }] },
+    ],
+    favorites: [],
+  };
+  const local = { playlists: [{ id: 'pl_keep', name: 'Kept', tracks: [] }], favorites: [] };
+
+  const merged = merge.mergeCollections(local, remote, { knownIds: ['pl_keep', 'pl_dead'] });
+  assert.deepEqual(merged.playlists.map((p) => p.id), ['pl_keep']);
+  assert.deepEqual(merged.removedIds, ['pl_dead']);
+  assert.deepEqual(merged.tombstones, ['pl_dead']);
+
+  const payload = merge.toRemotePayload(merged);
+  assert.deepEqual(payload.playlists.map((p) => p.clientId), ['pl_keep', 'pl_dead']);
+  assert.equal(payload.playlists[1].deleted, true);
+
+  // Supabase echoes the tombstoned collection back; the second pass must
+  // keep the playlist gone instead of rebuilding it from the live row.
+  const final = merge.mergeCollections(
+    { playlists: merged.playlists, favorites: merged.favorites },
+    { playlists: payload.playlists, favorites: [] },
+    { knownIds: merged.knownIds, allowPurge: false }
+  );
+  assert.deepEqual(final.playlists.map((p) => p.id), ['pl_keep']);
+});
+
 test('two devices with the same playlist keep one copy and both sets of tracks', () => {
   const local = {
     playlists: [{ id: 'pl_1', name: 'Mix', cover: 'data:image/png;base64,x', tracks: [yt('a'), yt('b')] }],

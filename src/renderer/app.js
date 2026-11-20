@@ -32413,8 +32413,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.7.8';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.8' : v;
+    let currentAppVersion = '0.7.9';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.9' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32500,7 +32500,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.8';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.9';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -33456,6 +33456,29 @@ function bindCoverHoldZoom(wrapEl) {
 
   function hydrateMissingPlaylistCovers() {}
 
+  // Tracks from Spotify's public embed have no stable source id. Giving them a
+  // random one made every re-import look like a brand-new song (275 tracks
+  // became 825 after three imports). Deriving the id from the track identity
+  // keeps repeat imports idempotent and gives cloud sync a stable key.
+  function stableImportId(title, artist, duration) {
+    const key = `${String(title || '').trim().toLowerCase()}\u0000${String(artist || '').trim().toLowerCase()}\u0000${Number(duration) || 0}`;
+    let h1 = 0x811c9dc5;
+    let h2 = 0x01000193;
+    for (let i = 0; i < key.length; i++) {
+      const c = key.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+      h2 = Math.imul(h2 + c + i, 0x85ebca6b) >>> 0;
+    }
+    return 'sp_' + h1.toString(36) + h2.toString(36);
+  }
+
+  // Identity used when adding imported songs to an existing playlist. Ids can
+  // change between imports (the public embed fallback gives none), so compare
+  // the song itself to avoid growing the playlist on every re-import.
+  function importedTrackKey(t) {
+    return `${String((t && t.title) || '').trim().toLowerCase()}\u0000${String((t && t.artist) || '').trim().toLowerCase()}`;
+  }
+
   async function matchSpotifyTracks(rawTracks, playlistName = 'Playlist', onProgress, options = {}) {
     if (el && el.linkImportModal) closeModal(el.linkImportModal);
     if (typeof playlistName === 'function') {
@@ -33563,13 +33586,14 @@ function bindCoverHoldZoom(wrapEl) {
           const spotifyId = /^[A-Za-z0-9]{22}$/.test(String(t.spotifyId || t.id || ''))
             ? String(t.spotifyId || t.id)
             : '';
+          const duration = Number(t.duration) || 0;
           converted.push({
-            id: hasRealId ? String(t.id) : (spotifyId ? `sp_${spotifyId}` : 'sp_' + Math.random().toString(36).slice(2, 10)),
+            id: hasRealId ? String(t.id) : (spotifyId ? `sp_${spotifyId}` : stableImportId(title, artist, duration)),
             spotifyId,
             spotifyUrl: t.spotifyUrl || (spotifyId ? `https://open.spotify.com/track/${spotifyId}` : ''),
             title,
             artist,
-            duration: Number(t.duration) || 0,
+            duration,
             thumbnail: thumb,
             cover: thumb,
             url: hasDirectUrl ? t.url : '',
@@ -33593,7 +33617,16 @@ function bindCoverHoldZoom(wrapEl) {
       }
     }
 
-    const validTracks = converted.filter(t => t && t.title);
+    const seenImported = new Set();
+    const validTracks = converted.filter((t) => {
+      if (!t || !t.title) return false;
+      // Two source rows can resolve to the same song. Keep one so importing a
+      // playlist into itself never doubles its length.
+      const key = t.path ? `local:${String(t.path).toLowerCase()}` : `${t.platform || ''}:${t.id || `${t.title}\u0000${t.artist}`}`;
+      if (seenImported.has(key)) return false;
+      seenImported.add(key);
+      return true;
+    });
     const failedCount = total - validTracks.length;
     validTracks.failStats = {
       errors: 0,
@@ -34248,8 +34281,8 @@ function bindCoverHoldZoom(wrapEl) {
         const pl = state.playlists.find(p => p.id === targetVal);
         if (pl) {
           if (!pl.cover && data.cover) pl.cover = data.cover;
-          const existingIds = new Set(pl.tracks.map(t => t.id));
-          const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+          const existingKeys = new Set(pl.tracks.map(importedTrackKey));
+          const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
           pl.tracks.push(...newTracks.map(stampAddedAt));
           localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
           renderPlaylistsList();
@@ -34759,8 +34792,8 @@ function bindCoverHoldZoom(wrapEl) {
         const pl = state.playlists.find(p => p.id === targetVal);
         if (pl) {
           if (!pl.cover && data.cover) pl.cover = data.cover;
-          const existingIds = new Set(pl.tracks.map(t => t.id));
-          const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+          const existingKeys = new Set(pl.tracks.map(importedTrackKey));
+          const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
           pl.tracks.push(...newTracks.map(stampAddedAt));
           localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
           renderPlaylistsList();
@@ -35373,8 +35406,8 @@ function bindCoverHoldZoom(wrapEl) {
           const targetPl = state.playlists.find(p => p.id === targetPlId);
           if (targetPl) {
             if (!targetPl.cover && data.cover) targetPl.cover = data.cover;
-            const existingIds = new Set(targetPl.tracks.map(t => t.id));
-            const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+            const existingKeys = new Set(targetPl.tracks.map(importedTrackKey));
+            const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
             targetPl.tracks.push(...newTracks.map(stampAddedAt));
             localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
             renderPlaylistsList();
@@ -35449,8 +35482,8 @@ function bindCoverHoldZoom(wrapEl) {
           const targetPl = state.playlists.find(p => p.id === targetPlId);
           if (targetPl) {
             if (!targetPl.cover && data.cover) targetPl.cover = data.cover;
-            const existingIds = new Set(targetPl.tracks.map(t => t.id));
-            const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+            const existingKeys = new Set(targetPl.tracks.map(importedTrackKey));
+            const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
             targetPl.tracks.push(...newTracks.map(stampAddedAt));
             localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
             renderPlaylistsList();
@@ -35520,8 +35553,8 @@ function bindCoverHoldZoom(wrapEl) {
           const targetPl = state.playlists.find(p => p.id === targetPlId);
           if (targetPl) {
             if (!targetPl.cover && data.cover) targetPl.cover = data.cover;
-            const existingIds = new Set(targetPl.tracks.map(t => t.id));
-            const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+            const existingKeys = new Set(targetPl.tracks.map(importedTrackKey));
+            const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
             targetPl.tracks.push(...newTracks.map(stampAddedAt));
             localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
             renderPlaylistsList();
@@ -35593,8 +35626,8 @@ function bindCoverHoldZoom(wrapEl) {
         const targetPl = state.playlists.find(p => p.id === targetPlId);
         if (targetPl) {
           if (!targetPl.cover && data.cover) targetPl.cover = data.cover;
-          const existingIds = new Set(targetPl.tracks.map(t => t.id));
-          const newTracks = foundTracks.filter(t => !existingIds.has(t.id));
+          const existingKeys = new Set(targetPl.tracks.map(importedTrackKey));
+          const newTracks = foundTracks.filter(t => !existingKeys.has(importedTrackKey(t)));
           targetPl.tracks.push(...newTracks.map(stampAddedAt));
           localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
           renderPlaylistsList();
@@ -35813,7 +35846,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.8';
+    let appVer = '0.7.9';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

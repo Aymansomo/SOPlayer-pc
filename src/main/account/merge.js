@@ -196,7 +196,12 @@ function mergeCollections(local, remote, options) {
   const tombstones = [];
   if (allowPurge) {
     for (const id of knownIds) {
-      if (present.has(id) || remoteById.has(id)) continue;
+      if (present.has(id)) continue;
+      // A playlist that is gone locally but still live in the cloud is exactly
+      // a delete that has not reached Supabase yet. Skipping it here leaves the
+      // row active, so the next sync resurrects the playlist the user removed.
+      const remotePl = remoteById.get(id);
+      if (remotePl && remotePl.deleted) continue; // already tombstoned
       tombstones.push(id);
     }
   }
