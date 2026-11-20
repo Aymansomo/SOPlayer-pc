@@ -32524,7 +32524,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.15';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.16';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -35854,7 +35854,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.15';
+    let appVer = '0.7.16';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();
