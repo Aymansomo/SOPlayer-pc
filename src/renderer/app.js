@@ -32524,7 +32524,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.12';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.13';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -32566,6 +32566,45 @@ function bindCoverHoldZoom(wrapEl) {
       }
     }
 
+    // The main process now returns the check result from the IPC call itself.
+    // This is the primary answer for a manual click; the event listeners below
+    // remain for background checks and for install/download messages.
+    function applyCheckResult(result) {
+      if (!result || !result.status) return false;
+      if (result.status === 'available') {
+        answeredByMain = true;
+        restoreButton();
+        latestUpdateInfo = { ...(result.info || {}) };
+        canNativeInstall = !!result.info?.canInstall;
+        populateOtaUpdateSheet(latestUpdateInfo);
+        return true;
+      }
+      if (result.status === 'latest') {
+        answeredByMain = true;
+        const wasManual = manualUpdateCheck;
+        restoreButton();
+        if (wasManual) showToast('You are using the latest version of SOPlayer!', 'success');
+        return true;
+      }
+      if (result.status === 'error') {
+        answeredByMain = true;
+        const wasManual = manualUpdateCheck;
+        restoreButton();
+        if (isWaitingToRestart) {
+          isWaitingToRestart = false;
+          if (latestUpdateInfo?.htmlUrl) {
+            window.open(latestUpdateInfo.htmlUrl, '_blank');
+          } else if (window.electronAPI && window.electronAPI.installUpdateNow) {
+            window.electronAPI.installUpdateNow();
+          }
+        } else if (wasManual) {
+          showToast(result.message || 'Could not check for updates', 'error');
+        }
+        return true;
+      }
+      return false;
+    }
+
     if (btn) {
       btn.addEventListener('click', async () => {
         if (manualUpdateCheck) return;
@@ -32591,6 +32630,7 @@ function bindCoverHoldZoom(wrapEl) {
 
         try {
           const r = await api.checkForUpdates();
+          if (r && r.result && applyCheckResult(r.result)) return;
           if (r && r.ok === false && !answeredByMain) {
             restoreButton();
             showToast('Could not check for updates', 'error');
@@ -35814,7 +35854,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.12';
+    let appVer = '0.7.13';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

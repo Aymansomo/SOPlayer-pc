@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const { log } = require('../shared/logger');
 
 const CHECK_DELAY_MS = 1500;
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
@@ -43,7 +44,6 @@ function initUpdater(getWindow) {
   const repo = repoMatch ? `${repoMatch[1]}/${repoMatch[2]}` : 'Aymansomo/SOPlayer-pc';
   const repoUrl = `https://github.com/${repo}`;
   const releasesUrl = `${repoUrl}/releases`;
-  let manualCheck = false;
   let installNow = false;
   let current = null;
   let isDownloaded = false;
@@ -208,12 +208,13 @@ function initUpdater(getWindow) {
   }
 
   /**
-   * The one place a version is decided: ask GitHub, then always answer. A manual
-   * click gets exactly one update-available / update-not-available / update-error.
+   * The one place a version is decided. Always returns a result so a manual
+   * click is answered by the IPC call itself — one-way events can be missed by
+   * a long-running renderer, which made "Check for updates" look like a dead
+   * button. Background checks still emit events for the auto-popup.
    */
-  const checkViaGithubApi = async () => {
-    const wasManual = manualCheck;
-    manualCheck = false;
+  const checkViaGithubApi = async (manual = false) => {
+    log('INFO', `[update] check start manual=${manual} installed=${APP_VERSION}`);
     let json = null;
     let latestVer = '';
     let apiError = '';
@@ -222,28 +223,29 @@ function initUpdater(getWindow) {
         headers: { 'User-Agent': 'SOPlayer' },
         signal: AbortSignal.timeout(6000)
       });
+      log('INFO', `[update] api status=${res.status}`);
       if (!res.ok) throw new Error('HTTP ' + res.status);
       json = await res.json();
       latestVer = String(json.tag_name || '').replace(/^v/i, '');
     } catch (err) {
       apiError = (err && err.message) || 'network error';
+      log('ERROR', `[update] api failed: ${apiError}`);
     }
 
     if (!latestVer) latestVer = await versionFromReleasesRedirect();
     if (!latestVer) {
-      if (wasManual) {
-        send('update-error', {
-          message: apiError === 'HTTP 403'
-            ? 'GitHub rate limit reached - try again in a few minutes.'
-            : `Could not reach GitHub (${apiError})`
-        });
-      }
-      return;
+      const message = apiError === 'HTTP 403'
+        ? 'GitHub rate limit reached - try again in a few minutes.'
+        : `Could not reach GitHub (${apiError})`;
+      log('ERROR', `[update] no version found: ${message}`);
+      if (!manual) send('update-error', { message });
+      return { status: 'error', message };
     }
 
+    log('INFO', `[update] latest=${latestVer} installed=${APP_VERSION}`);
     if (!isNewer(latestVer, APP_VERSION)) {
-      if (wasManual) send('update-not-available', { version: APP_VERSION });
-      return;
+      if (!manual) send('update-not-available', { version: APP_VERSION });
+      return { status: 'latest', version: APP_VERSION };
     }
 
     const matchedAsset = pickAsset(json && json.assets);
@@ -255,15 +257,18 @@ function initUpdater(getWindow) {
       assetUrl: matchedAsset ? matchedAsset.browser_download_url : null,
       assetName: matchedAsset ? matchedAsset.name : null
     };
-    if (!wasManual && readIgnored(ignoreFile) === latestVer) return;
-    send('update-available', {
+    log('INFO', `[update] available=${latestVer} asset=${matchedAsset ? matchedAsset.name : 'none'} canInstall=${canInstall && !!matchedAsset}`);
+    if (!manual && readIgnored(ignoreFile) === latestVer) return { status: 'skipped' };
+    const info = {
       version: current.version,
       releaseNotes: current.releaseNotes,
       publishedAt: current.publishedAt,
       htmlUrl: current.htmlUrl,
       canInstall: canInstall && !!matchedAsset,
       url: current.htmlUrl
-    });
+    };
+    if (!manual) send('update-available', info);
+    return { status: 'available', info };
   };
 
   // Detection is checkViaGithubApi's job now; electron-updater is only the
@@ -304,10 +309,15 @@ function initUpdater(getWindow) {
   }
 
   try { ipcMain.removeHandler('update-check'); } catch (_) {}
-  ipcMain.handle('update-check', () => {
-    manualCheck = true;
-    checkViaGithubApi();
-    return { ok: true };
+  ipcMain.handle('update-check', async () => {
+    try {
+      const result = await checkViaGithubApi(true);
+      return { ok: true, result };
+    } catch (err) {
+      const message = (err && err.message) || 'Update check failed';
+      log('ERROR', `[update] handler threw: ${message}`);
+      return { ok: false, result: { status: 'error', message } };
+    }
   });
 
   const doInstallNow = () => {
@@ -360,8 +370,8 @@ function initUpdater(getWindow) {
     }
   });
 
-  setTimeout(checkViaGithubApi, CHECK_DELAY_MS);
-  setInterval(checkViaGithubApi, CHECK_EVERY_MS).unref();
+  setTimeout(() => checkViaGithubApi(false), CHECK_DELAY_MS);
+  setInterval(() => checkViaGithubApi(false), CHECK_EVERY_MS).unref();
 }
 
 module.exports = { initUpdater };

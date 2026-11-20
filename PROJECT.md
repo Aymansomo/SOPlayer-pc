@@ -704,3 +704,16 @@ that file; elsewhere the row still shows its title and artist.
 rules), `src/main/main.js` + `src/main/preload.js` (`account-*` IPC),
 `src/renderer/app.js` (`initCloudAccountSync`), `supabase/schema.sql`,
 `test/account-merge.test.js`.
+
+## In-app updates (PC)
+
+`src/main/updater.js` asks the public GitHub API for the newest `v*` release of
+`Aymansomo/SOPlayer-pc`, falling back to the quota-free `/releases/latest`
+redirect if the API is rate-limited. **Check for updates** calls the `update-check`
+IPC, which *returns* the decision (`available` / `latest` / `error`) to the
+renderer; the renderer no longer depends solely on one-way events, so a click
+always produces a card or toast. Background checks still emit events for the
+automatic popup. Each check is logged as `[update] ...` in `riff.log`, which is
+the first place to look if a click ever looks dead again. The asset installer
+(`pickAsset` + `downloadAndInstallAsset`) downloads the matching `.exe` and runs
+it silently.
