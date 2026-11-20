@@ -722,3 +722,9 @@ automatic popup. Each check is logged as `[update] ...` in `riff.log`, which is
 the first place to look if a click ever looks dead again. The asset installer
 (`pickAsset` + `downloadAndInstallAsset`) downloads the matching `.exe` and runs
 it silently.
+
+The sheet also carries the generic `.modal-backdrop` class, which is
+`visibility: hidden; pointer-events: none` unless `.visible` is added. The
+update sheet only toggles `.hidden`, so `#update-modal.ota-update-backdrop`
+forces both properties back to visible/auto — without those two lines the card
+opens but is completely invisible and unclickable.
