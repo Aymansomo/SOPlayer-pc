@@ -158,3 +158,57 @@ test('rows rebuild into renderer tracks without losing local paths', () => {
   assert.equal(track.addedAt, 1700000000000);
   assert.equal(merge.trackKey(track), 'local:e:/music/a.mp3');
 });
+
+test('a track removed locally stays removed after the next sync', () => {
+  const first = merge.mergeCollections(
+    { playlists: [{ id: 'pl_1', name: 'Mix', tracks: [yt('a'), yt('b')] }], favorites: [yt('z')] },
+    { playlists: [], favorites: [] },
+    { knownIds: [] }
+  );
+  const remote = merge.toRemotePayload(first);
+
+  // The user removes track b and unlikes z here.
+  const second = merge.mergeCollections(
+    { playlists: [{ id: 'pl_1', name: 'Mix', tracks: [yt('a')] }], favorites: [] },
+    remote,
+    { knownIds: first.knownIds, knownItems: first.knownItems, knownFavorites: first.knownFavorites }
+  );
+
+  assert.deepEqual(second.playlists[0].tracks.map((t) => t.id), ['a']);
+  assert.deepEqual(second.favorites, []);
+  assert.deepEqual(second.knownItems.pl_1, ['youtube:a']);
+  assert.deepEqual(second.knownFavorites, []);
+
+  // Pushing that merge really does drop the rows in Supabase.
+  const payload = merge.toRemotePayload(second);
+  assert.deepEqual(payload.playlists[0].items.map((i) => i.key), ['youtube:a']);
+  assert.deepEqual(payload.favorites, []);
+});
+
+test('a track added on another PC still arrives', () => {
+  const remote = {
+    playlists: [{ clientId: 'pl_1', name: 'Mix', deleted: false, items: [{ key: 'youtube:a' }, { key: 'youtube:new' }] }],
+    favorites: [{ key: 'youtube:fresh' }],
+  };
+  const merged = merge.mergeCollections(
+    { playlists: [{ id: 'pl_1', name: 'Mix', tracks: [yt('a')] }], favorites: [] },
+    remote,
+    { knownIds: ['pl_1'], knownItems: { pl_1: ['youtube:a'] }, knownFavorites: [] }
+  );
+  assert.deepEqual(merged.playlists[0].tracks.map((t) => t.id), ['a', 'new']);
+  assert.deepEqual(merged.favorites.map((t) => t.id), ['fresh']);
+});
+
+test('deleting the last playlist is a delete when the renderer says so', () => {
+  const remote = { playlists: [{ clientId: 'pl_1', name: 'Only', deleted: false, items: [] }], favorites: [] };
+  const local = { playlists: [], favorites: [] };
+
+  // An empty collection nobody vouches for is still treated as a reset.
+  const reset = merge.mergeCollections(local, remote, { knownIds: ['pl_1'] });
+  assert.deepEqual(reset.playlists.map((p) => p.id), ['pl_1']);
+
+  // The renderer saw the user press Delete, so the purge goes through.
+  const purged = merge.mergeCollections(local, remote, { knownIds: ['pl_1'], allowPurge: true });
+  assert.deepEqual(purged.playlists, []);
+  assert.deepEqual(purged.tombstones, ['pl_1']);
+});

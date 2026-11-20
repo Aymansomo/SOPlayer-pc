@@ -71,8 +71,19 @@ function loadConfig() {
 function loadState() {
   if (state) return state;
   const stored = readJson(STATE_FILE) || {};
+  const knownItems = {};
+  if (stored.knownItems && typeof stored.knownItems === 'object') {
+    for (const [id, keys] of Object.entries(stored.knownItems)) {
+      if (Array.isArray(keys)) knownItems[id] = keys.map(String);
+    }
+  }
   state = {
     knownIds: Array.isArray(stored.knownIds) ? stored.knownIds.map(String) : [],
+    // Per-playlist item keys and favourite keys as of the last successful sync.
+    // Without them a track removed locally looks like a track the cloud should
+    // copy back in, and "remove from playlist" undoes itself.
+    knownItems,
+    knownFavorites: Array.isArray(stored.knownFavorites) ? stored.knownFavorites.map(String) : [],
   };
   return state;
 }
@@ -333,6 +344,8 @@ async function sync(payload) {
     };
     const merged = merge.mergeCollections(local, pulled.data || {}, {
       knownIds: localState.knownIds,
+      knownItems: localState.knownItems,
+      knownFavorites: localState.knownFavorites,
       allowPurge: payload && payload.allowPurge !== false,
     });
 
@@ -348,11 +361,18 @@ async function sync(payload) {
       ? merge.mergeCollections(
         { playlists: merged.playlists, favorites: merged.favorites },
         server,
-        { knownIds: merged.knownIds, allowPurge: false }
+        {
+          knownIds: merged.knownIds,
+          knownItems: merged.knownItems,
+          knownFavorites: merged.knownFavorites,
+          allowPurge: false,
+        }
       )
       : merged;
 
     localState.knownIds = final.knownIds;
+    localState.knownItems = final.knownItems || {};
+    localState.knownFavorites = final.knownFavorites || [];
     localState.lastSyncAt = Date.now();
     localState.lastError = '';
     saveState();

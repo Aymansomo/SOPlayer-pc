@@ -31,9 +31,12 @@ function isNewer(latest, current) {
 function initUpdater(getWindow) {
   const ignoreFile = path.join(app.getPath('userData'), 'ignored-update.json');
   const pkg = require('../../package.json');
-  if (pkg.version) {
+  if (pkg.version && typeof app.setVersion === 'function') {
     app.setVersion(pkg.version);
   }
+  // The version every comparison below is made against, even if the runtime
+  // could not be told about it.
+  const APP_VERSION = String(pkg.version || app.getVersion() || '0.0.0');
   // Point the updater at this fork's own releases, never at upstream Riff.
   const repoMatch = String(pkg.homepage || (pkg.repository && pkg.repository.url) || '')
     .match(/github\.com[/:]([^/]+)\/([^/.#]+)/i);
@@ -45,7 +48,7 @@ function initUpdater(getWindow) {
   let current = null;
 
   try { ipcMain.removeHandler('get-app-version'); } catch (_) {}
-  ipcMain.handle('get-app-version', () => app.getVersion());
+  ipcMain.handle('get-app-version', () => APP_VERSION);
 
   const isDev = !app.isPackaged;
   const devConfigFile = path.join(__dirname, '../../dev-app-update.yml');
@@ -172,17 +175,53 @@ function initUpdater(getWindow) {
     }
   }
 
+  // `releases/latest` redirects straight to the newest tag. Unlike the API it has
+  // no hourly quota, so it still answers when the 60-calls/hour limit is hit.
+  const versionFromReleasesRedirect = async () => {
+    try {
+      const res = await fetch(`${repoUrl}/releases/latest`, {
+        redirect: 'follow',
+        headers: { 'User-Agent': 'SOPlayer' }
+      });
+      if (!res.ok) return '';
+      const tag = String(res.url || '').split('/tag/')[1] || '';
+      return tag.replace(/^v/i, '').trim();
+    } catch (_) {
+      return '';
+    }
+  };
+
   const checkViaGithubApi = async () => {
+    const currentVersion = APP_VERSION;
+    let json = null;
+    let latestVer = '';
+    let apiError = '';
     try {
       const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
         headers: { 'User-Agent': 'SOPlayer' }
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const json = await res.json();
-      const latestVer = (json.tag_name || '').replace(/^v/i, '');
-      const currentVersion = pkg.version || app.getVersion();
-      if (isNewer(latestVer, currentVersion)) {
-        const assets = Array.isArray(json.assets) ? json.assets : [];
+      json = await res.json();
+      latestVer = String(json.tag_name || '').replace(/^v/i, '');
+    } catch (err) {
+      apiError = (err && err.message) || 'network error';
+    }
+
+    if (!latestVer) latestVer = await versionFromReleasesRedirect();
+    if (!latestVer) {
+      if (manualCheck) {
+        send('update-error', {
+          message: apiError === 'HTTP 403'
+            ? 'GitHub rate limit reached - try again in a few minutes.'
+            : `Could not reach GitHub (${apiError})`
+        });
+      }
+      manualCheck = false;
+      return;
+    }
+
+    if (isNewer(latestVer, currentVersion)) {
+        const assets = Array.isArray(json && json.assets) ? json.assets : [];
         let matchedAsset = null;
         if (process.platform === 'win32') {
           const isPortable = !!process.env.PORTABLE_EXECUTABLE_FILE;
@@ -208,28 +247,21 @@ function initUpdater(getWindow) {
           assetName: matchedAsset ? matchedAsset.name : null
         };
         const ignored = readIgnored(ignoreFile) === latestVer;
-        if (ignored && !manualCheck) return;
+        const wasManual = manualCheck;
         manualCheck = false;
+        if (ignored && !wasManual) return;
         send('update-available', {
           version: latestVer,
-          releaseNotes: json.body || '',
-          publishedAt: json.published_at || '',
-          htmlUrl: json.html_url || '',
+          releaseNotes: (json && json.body) || '',
+          publishedAt: (json && json.published_at) || '',
+          htmlUrl: (json && json.html_url) || `${releasesUrl}/tag/v${latestVer}`,
           canInstall: canInstallFromAsset,
-          url: json.html_url || `${releasesUrl}/tag/v${latestVer}`
+          url: (json && json.html_url) || `${releasesUrl}/tag/v${latestVer}`
         });
       } else {
-        if (manualCheck) {
-          send('update-not-available', { version: currentVersion });
-        }
+        if (manualCheck) send('update-not-available', { version: currentVersion });
         manualCheck = false;
       }
-    } catch (err) {
-      if (manualCheck) {
-        send('update-error', { message: err && err.message ? err.message : 'Update failed' });
-      }
-      manualCheck = false;
-    }
   };
   const fallbackFetchGitHub = checkViaGithubApi;
 
@@ -335,12 +367,11 @@ function initUpdater(getWindow) {
   }
 
   const check = () => {
-    if (!autoUpdater || !canInstall || isDev) {
-      return fallbackFetchGitHub();
-    }
-    return autoUpdater.checkForUpdates().catch(() => {
-      return fallbackFetchGitHub();
-    });
+    // Always ask GitHub directly. electron-updater's own check needs
+    // app-update.yml inside the installed build and, when that or the network
+    // fails, a manual "Check for updates" click finished with no answer at all.
+    // Detection is the API's job now; electron-updater still installs.
+    return fallbackFetchGitHub();
   };
 
   try { ipcMain.removeHandler('update-check'); } catch (_) {}

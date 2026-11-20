@@ -21443,6 +21443,9 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
 
   function deleteCurrentPlaylist() {
     if (!state.currentPlaylistId) return;
+    // A deliberate delete of the last remaining playlist is still a delete; the
+    // cloud sync is only allowed to purge when this flag or a real library says so.
+    window.__riffCloudPurgeAllowed = true;
     state.playlists = state.playlists.filter(p => p.id !== state.currentPlaylistId);
     localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
     state.currentPlaylistId = null;
@@ -30533,7 +30536,7 @@ function bindCoverHoldZoom(wrapEl) {
       return api.accountSync({
         playlists: state.playlists || [],
         favorites: state.favorites || [],
-        allowPurge: (state.playlists || []).length > 0,
+        allowPurge: (state.playlists || []).length > 0 || window.__riffCloudPurgeAllowed === true,
       }).then((res) => {
         syncing = false;
         status.syncing = false;
@@ -32413,8 +32416,8 @@ function bindCoverHoldZoom(wrapEl) {
   (function initUpdateUI() {
     const api = window.electronAPI;
     const $ = (id) => document.getElementById(id);
-    let currentAppVersion = '0.7.9';
-    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.9' : v;
+    let currentAppVersion = '0.7.10';
+    const formatDisplayVer = (v) => (!v || v.startsWith('44.')) ? '0.7.10' : v;
     if (api && api.getAppVersion) {
       api.getAppVersion().then((v) => {
         if (v) {
@@ -32435,6 +32438,7 @@ function bindCoverHoldZoom(wrapEl) {
     const btn = $('btn-check-updates');
     const originalBtnHtml = btn ? btn.innerHTML : 'Check for updates';
     let manualUpdateCheck = false;
+    let answeredByMain = false;
     let checkTimeoutId = null;
     const releaseRepo = 'Aymansomo/SOPlayer-pc';
     const releasesApi = `https://api.github.com/repos/${releaseRepo}/releases/latest`;
@@ -32500,7 +32504,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (!manualUpdateCheck && rawVer && ignoredVer === rawVer) return;
 
       const displayVer = rawVer.endsWith('.0.0') ? ('v' + rawVer.slice(0, -4)) : (rawVer.endsWith('.0') ? ('v' + rawVer.slice(0, -2)) : ('v' + rawVer));
-      if (verEl) verEl.textContent = displayVer || 'v0.7.9';
+      if (verEl) verEl.textContent = displayVer || 'v0.7.10';
       if (timeEl) timeEl.textContent = formatRelativeReleaseTime(info?.publishedAt || info?.releaseDate || '');
 
       const { cleanText, bannerUrl } = parseGithubReleaseBodyAndBanner(info?.releaseNotes || '');
@@ -32593,6 +32597,7 @@ function bindCoverHoldZoom(wrapEl) {
       btn.addEventListener('click', async () => {
         if (manualUpdateCheck) return;
         manualUpdateCheck = true;
+        answeredByMain = false;
         btn.disabled = true;
         btn.innerHTML = `<svg class="m3-btn-shape-spinner" style="width:16px;height:16px;margin-right:6px;" viewBox="-180 -180 360 360"><path fill="currentColor" d="${DEFAULT_SPINNER_SHAPE_PATH}"/></svg><span>Checking...</span>`;
 
@@ -32602,7 +32607,9 @@ function bindCoverHoldZoom(wrapEl) {
         }
 
         checkTimeoutId = setTimeout(() => {
-          if (manualUpdateCheck) {
+          // Only step in when the main process has not answered at all, so a
+          // slow-but-working check cannot show a second, contradictory result.
+          if (manualUpdateCheck && !answeredByMain) {
             checkDirectFromRenderer();
           }
         }, 2500);
@@ -32622,6 +32629,7 @@ function bindCoverHoldZoom(wrapEl) {
 
     if (api && api.onUpdateAvailable) {
       api.onUpdateAvailable(async (info) => {
+        answeredByMain = true;
         restoreButton();
         latestUpdateInfo = { ...(info || {}) };
         canNativeInstall = !!info?.canInstall;
@@ -32678,6 +32686,7 @@ function bindCoverHoldZoom(wrapEl) {
 
     if (api && api.onUpdateNotAvailable) {
       api.onUpdateNotAvailable(() => {
+        answeredByMain = true;
         const wasManual = manualUpdateCheck;
         restoreButton();
         if (wasManual) {
@@ -32687,7 +32696,8 @@ function bindCoverHoldZoom(wrapEl) {
     }
 
     if (api && api.onUpdateError) {
-      api.onUpdateError(() => {
+      api.onUpdateError((info) => {
+        answeredByMain = true;
         const wasManual = manualUpdateCheck;
         restoreButton();
         if (isWaitingToRestart) {
@@ -32702,7 +32712,7 @@ function bindCoverHoldZoom(wrapEl) {
             } catch (_) {}
           }
         } else if (wasManual) {
-          showToast('Could not check for updates', 'error');
+          showToast((info && info.message) || 'Could not check for updates', 'error');
         }
       });
     }
@@ -35846,7 +35856,7 @@ function bindCoverHoldZoom(wrapEl) {
       if (typeof showToast === 'function') showToast('No playlists to export', 'error');
       return;
     }
-    let appVer = '0.7.9';
+    let appVer = '0.7.10';
     try {
       if (window.electronAPI && window.electronAPI.getAppVersion) {
         const v = await window.electronAPI.getAppVersion();

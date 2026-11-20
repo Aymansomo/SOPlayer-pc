@@ -98,15 +98,21 @@ function uniqueTracks(tracks) {
  * One playlist that exists on both sides: keep the local object (and therefore
  * its cover, description and the exact track objects the renderer already
  * holds), take local order first, then append anything only the other device had.
+ *
+ * `knownKeys` is the set of items this machine had in the playlist at the last
+ * successful sync. A remote row with one of those keys that is no longer in the
+ * local list was deleted here, so it must not be copied back — that is what made
+ * "remove from playlist" undo itself on the next sync.
  */
-function mergePlaylist(local, remote) {
+function mergePlaylist(local, remote, knownKeys) {
   const localTracks = Array.isArray(local.tracks) ? local.tracks : [];
   const merged = uniqueTracks(localTracks).slice();
   const seen = new Set(merged.map(trackKey));
+  const known = knownKeys instanceof Set ? knownKeys : new Set();
   const remoteItems = Array.isArray(remote && remote.items) ? remote.items : [];
   for (const row of remoteItems) {
     const key = String((row && row.key) || '');
-    if (!key || seen.has(key)) continue;
+    if (!key || seen.has(key) || known.has(key)) continue;
     const rebuilt = trackFromRow(row);
     if (!rebuilt) continue;
     seen.add(key);
@@ -143,13 +149,21 @@ function mergeCollections(local, remote, options) {
   const localFavorites = Array.isArray(local && local.favorites) ? local.favorites : [];
   const remoteFavorites = Array.isArray(remote && remote.favorites) ? remote.favorites : [];
   const knownIds = new Set((opts.knownIds || []).map(String));
-  const allowPurge = opts.allowPurge !== false && localPlaylists.length > 0;
+  // The caller owns the "is this a real collection or an empty/broken store?"
+  // question. A purge needs a real local library, or an explicit `allowPurge:
+  // true` from a renderer that knows the user just deleted the last playlist.
+  const allowPurge = opts.allowPurge !== false && (localPlaylists.length > 0 || opts.allowPurge === true);
+  const knownItems = opts.knownItems && typeof opts.knownItems === 'object' ? opts.knownItems : {};
+  const knownFavorites = new Set((opts.knownFavorites || []).map(String));
 
   const favorites = uniqueTracks(localFavorites).slice();
   const favoriteKeys = new Set(favorites.map(trackKey));
   for (const row of remoteFavorites) {
     const key = String((row && row.key) || '');
     if (!key || favoriteKeys.has(key)) continue;
+    // Liked here before and gone from the local list now: the user unliked it,
+    // so the cloud copy must not bring it back.
+    if (knownFavorites.has(key)) continue;
     const rebuilt = trackFromRow(row);
     if (!rebuilt) continue;
     favoriteKeys.add(key);
@@ -174,7 +188,8 @@ function mergeCollections(local, remote, options) {
       continue;
     }
     present.add(id);
-    playlists.push(remotePl ? mergePlaylist(pl, remotePl) : pl);
+    const knownKeys = Array.isArray(knownItems[id]) ? new Set(knownItems[id].map(String)) : new Set();
+    playlists.push(remotePl ? mergePlaylist(pl, remotePl, knownKeys) : pl);
   }
 
   for (const remotePl of remotePlaylists) {
@@ -213,12 +228,23 @@ function mergeCollections(local, remote, options) {
   }
   for (const id of removedIds) nextKnown.add(id);
 
+  // Remember exactly which tracks each playlist holds after this merge, so the
+  // next sync can tell "new from another PC" apart from "deleted here".
+  const nextItems = {};
+  for (const pl of playlists) {
+    const id = playlistIdOf(pl);
+    if (!id) continue;
+    nextItems[id] = uniqueTracks(Array.isArray(pl.tracks) ? pl.tracks : []).map(trackKey).filter(Boolean);
+  }
+
   return {
     favorites,
     playlists,
     removedIds: Array.from(new Set(removedIds)),
     tombstones,
     knownIds: Array.from(nextKnown),
+    knownItems: nextItems,
+    knownFavorites: favorites.map(trackKey).filter(Boolean),
   };
 }
 

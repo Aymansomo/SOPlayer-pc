@@ -663,7 +663,14 @@ that file; elsewhere the row still shows its title and artist.
   cannot leave half a library behind.
 - An empty local collection only *adopts* cloud playlists — it never deletes
   them. A deletion becomes a tombstone only for a playlist that synced before
-  and only while other playlists still exist locally.
+  and only while other playlists still exist locally (or right after the user
+  pressed Delete on the last one).
+- **Deleting really deletes.** `account-state.json` remembers `knownIds`,
+  `knownItems` and `knownFavorites` — what this PC had at the last successful
+  sync. A track or like that was synced and is now missing locally is treated
+  as a delete and is *not* copied back from the cloud, while a track that
+  only the other PC has still arrives. (Before this, removing a song from a
+  playlist or unliking one was undone by the next sync.)
 - Signing out keeps your local library as it is.
 - Tokens are encrypted with Electron `safeStorage`
   (`%LOCALAPPDATA%\Riff\account-session.bin`); the project URL and anon key sit
