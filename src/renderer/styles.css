@@ -5497,7 +5497,7 @@ body.perf .playbar .time-label { transition: none !important; }
   top: 0 !important;
   left: 50% !important;
   transform: translateX(-50%) !important;
-  z-index: 99999 !important;
+  z-index: 100040 !important;
   display: flex !important;
   flex-direction: column !important;
   align-items: center !important;
@@ -11933,7 +11933,9 @@ body.perf .bulk-select-bar {
 #update-modal.ota-update-backdrop {
   position: fixed !important;
   inset: 0 !important;
-  z-index: 99990 !important;
+  /* Must sit above the Settings modal (99999) — the update button lives
+     inside Settings, so a lower value makes the popup appear to do nothing. */
+  z-index: 100030 !important;
   background: rgba(6, 6, 9, 0.58) !important;
   backdrop-filter: blur(18px) saturate(1.15) !important;
   -webkit-backdrop-filter: blur(18px) saturate(1.15) !important;
