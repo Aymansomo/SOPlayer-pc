@@ -194,6 +194,14 @@ test('favourites, playlists and scrobbles sync both ways', async (t) => {
   const idempotent = collection.syncFromRenderer({ favorites: [localTrack], playlists: [] });
   assert.strictEqual(idempotent.changed, false, 'unchanged state must not rewrite anything');
 
+  // A client that has not loaded its collection yet pushes nothing. That used
+  // to read as "every like was removed" and emptied the store, so it is only
+  // a delete when the renderer says it is ready (see the pushes below).
+  const notLoaded = collection.syncFromRenderer({ favorites: [], playlists: [] });
+  assert.strictEqual(notLoaded.collection.favorites.length, 1, 'an empty push keeps the stored likes');
+  assert.strictEqual(collection.starredSongs().length, 1);
+  collection.syncFromRenderer({ favorites: [localTrack], playlists: [] });
+
   // ---- Phone -> store ----
   const starred = await call('star', `id=${song.id}`);
   assert.strictEqual(starred.status, 'ok');
@@ -210,7 +218,7 @@ test('favourites, playlists and scrobbles sync both ways', async (t) => {
   // The PC adopts the phone star, so its next push contains it and a later
   // removal on the PC is detected as an unstar.
   collection.syncFromRenderer({ favorites: [localTrack], playlists: [] });
-  const afterUnstar = collection.syncFromRenderer({ favorites: [], playlists: [] });
+  const afterUnstar = collection.syncFromRenderer({ favorites: [], playlists: [], ready: true });
   assert.strictEqual(afterUnstar.changed, true);
   assert.strictEqual(afterUnstar.collection.favorites.length, 0);
   assert.strictEqual(collection.starredSongs().length, 0);
@@ -267,7 +275,7 @@ test('favourites, playlists and scrobbles sync both ways', async (t) => {
   assert.strictEqual(userPlaylists(remaining).length, 1);
   assert.ok(!userPlaylists(remaining).some((pl) => pl.id === phonePlaylistId));
 
-  const cleared = collection.syncFromRenderer({ favorites: [], playlists: [] });
+  const cleared = collection.syncFromRenderer({ favorites: [], playlists: [], ready: true });
   assert.strictEqual(cleared.collection.playlists.length, 0);
   await call('deleteplaylist', 'id=pl_renderer1');
   const gone = await call('getPlaylists');

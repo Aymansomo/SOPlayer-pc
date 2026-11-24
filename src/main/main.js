@@ -22,9 +22,17 @@ const RFACC_KEY = crypto.createHash('sha256').update('riff-account-key-v1').dige
 const APP_ID = 'io.github.Aymansomo.soplayer-pc';
 const IS_MAC = process.platform === 'darwin';
 
+// A dev run (npm start) starts as `Riff Dev` and therefore has its own
+// Electron profile (userData, cookies, localStorage, single-instance lock),
+// so it can run beside the installed SOPlayer and its renderer settings stay
+// separate. Account files are split too (see account.js); the music library,
+// downloads and phone config keep using the normal data folder.
+// Opt out with RIFF_DEV_PROFILE=0.
+const DEV_PROFILE = !app.isPackaged && process.env.RIFF_DEV_PROFILE !== '0';
+
 // Keep the historical data folder name so settings, logins and the library
 // index survive the rename; only the visible name changes.
-app.setName('Riff');
+app.setName(DEV_PROFILE ? 'Riff Dev' : 'Riff');
 if (process.platform === 'win32') app.setAppUserModelId(APP_ID);
 
 function encryptAccount(dataObj) {

@@ -155,6 +155,10 @@ function mergeCollections(local, remote, options) {
   const allowPurge = localPlaylists.length > 0 ? opts.allowPurge !== false : opts.allowPurge === true;
   const knownItems = opts.knownItems && typeof opts.knownItems === 'object' ? opts.knownItems : {};
   const knownFavorites = new Set((opts.knownFavorites || []).map(String));
+  // Liking is an accumulating list, so deleting the last likes needs the same
+  // vouch a playlist purge needs: a client that has not loaded its library yet
+  // sends no favourites and knows none, and that used to erase the account.
+  const allowFavoritePurge = localFavorites.length > 0 || opts.allowPurge === true;
 
   const favorites = uniqueTracks(localFavorites).slice();
   const favoriteKeys = new Set(favorites.map(trackKey));
@@ -163,7 +167,7 @@ function mergeCollections(local, remote, options) {
     if (!key || favoriteKeys.has(key)) continue;
     // Liked here before and gone from the local list now: the user unliked it,
     // so the cloud copy must not bring it back.
-    if (knownFavorites.has(key)) continue;
+    if (knownFavorites.has(key) && allowFavoritePurge) continue;
     const rebuilt = trackFromRow(row);
     if (!rebuilt) continue;
     favoriteKeys.add(key);

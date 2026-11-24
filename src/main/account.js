@@ -11,13 +11,22 @@
 
 const fs = require('fs');
 const path = require('path');
-const { safeStorage } = require('electron');
+const { app, safeStorage } = require('electron');
 const { DATA_DIR } = require('../shared/platform');
 const merge = require('./account/merge');
 
-const CONFIG_FILE = path.join(DATA_DIR, 'account.json');
-const SESSION_FILE = path.join(DATA_DIR, 'account-session.bin');
-const STATE_FILE = path.join(DATA_DIR, 'account-state.json');
+// A dev run (npm start) keeps its account files in its own Electron profile
+// (%APPDATA%\Riff Dev on Windows) instead of the shared data folder. Before
+// this, dev read the installed app's session, silently signed in as the same
+// user and pushed its test playlists over the real collection, which is how
+// music disappeared from the installed app on its next sync. With the split,
+// dev starts signed out and a test account can never reach the real one.
+const DEV_PROFILE = !app.isPackaged && process.env.RIFF_DEV_PROFILE !== '0';
+const ACCOUNT_DIR = DEV_PROFILE ? app.getPath('userData') : DATA_DIR;
+
+const CONFIG_FILE = path.join(ACCOUNT_DIR, 'account.json');
+const SESSION_FILE = path.join(ACCOUNT_DIR, 'account-session.bin');
+const STATE_FILE = path.join(ACCOUNT_DIR, 'account-state.json');
 
 // Personal project, hard-coded on request so the Settings → Account fields do
 // not have to be filled in on every machine/reinstall. The anon key is public

@@ -329,6 +329,14 @@ Credentials: Subsonic token auth (`u`, `t`, `s`) or plain/`enc:` password, or
   either side does not come back on the next sync. Anything the PC previously
   pushed and no longer includes counts as an unstar; phone-added entries are
   never mistaken for deletions.
+- **A push that carries nothing is not a delete.** A client that has not loaded
+  its collection yet (fresh install, dev run with its own storage) sends empty
+  arrays; reading that as "everything was removed" tombstoned the whole store,
+  the renderer adopted the empty snapshot into `localStorage`, and the next
+  cloud sync pushed it to the account. Deletions now need a non-empty push or
+  `ready: true`, which the renderer sends once it has held a real collection,
+  and a snapshot that lost everything is refused by `applyPhoneCollection` and
+  the local collection is pushed again instead of being replaced by it.
 - The same push carries the PC's last 100 plays (`history`, with `playedAt`)
   and its generated Daily Mixes (`riff_daily_mixes`). History tracks and
   favourites are adopted like playlist tracks, so a PC star is playable on the
@@ -694,6 +702,25 @@ that file; elsewhere the row still shows its title and artist.
   as a delete and is *not* copied back from the cloud, while a track that
   only the other PC has still arrives. (Before this, removing a song from a
   playlist or unliking one was undone by the next sync.)
+- **Dev runs are sandboxed.** `npm start` (`app.isPackaged === false`) starts
+  as `Riff Dev` and gets its own Electron profile — `%APPDATA%\Riff Dev` on
+  Windows, `~/Library/Application Support/Riff Dev` on macOS,
+  `~/.config/Riff Dev` on Linux — with `account.json`,
+  `account-session.bin` and `account-state.json` kept there instead of in the
+  music data folder. A dev run therefore starts signed out and has to be
+  signed in with a test account: it can no longer adopt the installed app's
+  session, so a dev sync cannot overwrite the real cloud collection, and both
+  can run at the same time. Library index, downloads, caches and the phone
+  config stay shared so dev still sees the same music. The phone collection
+  store (`mobile-collection.json`) is part of that profile too: a dev run has
+  its own playlists, so pointing it at the installed app's store made its
+  smaller collection look like mass deletions and emptied the phone's library.
+  `RIFF_DEV_PROFILE=0 npm start` restores the old single-profile behaviour.
+- **An empty favourite list cannot erase the account.** Dropping the last likes
+  needs the same vouch a playlist purge needs (`allowPurge`, set when you
+  unlike); a client that knows the likes but holds none pushes them back
+  instead of deleting them, so a wiped or not-yet-loaded collection can no
+  longer empty the cloud.
 - Signing out keeps your local library as it is.
 - Tokens are encrypted with Electron `safeStorage`
   (`%LOCALAPPDATA%\Riff\account-session.bin`); the project URL and anon key sit

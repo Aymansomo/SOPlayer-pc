@@ -167,11 +167,12 @@ test('a track removed locally stays removed after the next sync', () => {
   );
   const remote = merge.toRemotePayload(first);
 
-  // The user removes track b and unlikes z here.
+  // The user removes track b and unlikes z here (the unlike vouches for the
+  // purge, like deleting the last playlist does).
   const second = merge.mergeCollections(
     { playlists: [{ id: 'pl_1', name: 'Mix', tracks: [yt('a')] }], favorites: [] },
     remote,
-    { knownIds: first.knownIds, knownItems: first.knownItems, knownFavorites: first.knownFavorites }
+    { knownIds: first.knownIds, knownItems: first.knownItems, knownFavorites: first.knownFavorites, allowPurge: true }
   );
 
   assert.deepEqual(second.playlists[0].tracks.map((t) => t.id), ['a']);
@@ -197,6 +198,30 @@ test('a track added on another PC still arrives', () => {
   );
   assert.deepEqual(merged.playlists[0].tracks.map((t) => t.id), ['a', 'new']);
   assert.deepEqual(merged.favorites.map((t) => t.id), ['fresh']);
+});
+
+test('a client with no likes loaded cannot empty the cloud favourites', () => {
+  const remote = {
+    playlists: [{ clientId: 'pl_1', name: 'Mix', deleted: false, items: [{ key: 'youtube:a' }] }],
+    favorites: [{ key: 'youtube:z', title: 'liked' }],
+  };
+
+  // A wiped or not-yet-loaded client knows the like and has none of its own.
+  const merged = merge.mergeCollections(
+    { playlists: [], favorites: [] },
+    remote,
+    { knownIds: ['pl_1'], knownFavorites: ['youtube:z'] }
+  );
+  assert.deepEqual(merged.favorites.map((t) => t.id), ['z']);
+  assert.deepEqual(merge.toRemotePayload(merged).favorites.map((f) => f.key), ['youtube:z']);
+
+  // The user really unliked it: the renderer vouches and the like is dropped.
+  const purged = merge.mergeCollections(
+    { playlists: [], favorites: [] },
+    remote,
+    { knownIds: ['pl_1'], knownFavorites: ['youtube:z'], allowPurge: true }
+  );
+  assert.deepEqual(purged.favorites, []);
 });
 
 test('deleting the last playlist is a delete when the renderer says so', () => {

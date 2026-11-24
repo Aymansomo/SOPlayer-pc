@@ -30,8 +30,27 @@ const online = require('./online');
 const trending = require('./trending');
 const mixes = require('./mixes');
 
+/**
+ * This file holds the phone's favourites and playlists, i.e. account data. A dev
+ * run gets its own copy: `npm start` uses a separate renderer storage, so
+ * pointing it at the installed app's store made its (much smaller) collection
+ * look like mass deletions and emptied the phone's library.
+ */
+function resolveStatePath() {
+  if (process.env.RIFF_DEV_PROFILE !== '0') {
+    try {
+      const electron = require('electron');
+      const electronApp = electron && electron.app;
+      if (electronApp && !electronApp.isPackaged) {
+        return path.join(electronApp.getPath('userData'), 'mobile-collection.json');
+      }
+    } catch (_) {}
+  }
+  return path.join(DATA_DIR, 'mobile-collection.json');
+}
+
 const VERSION = 1;
-const STATE_PATH = path.join(DATA_DIR, 'mobile-collection.json');
+const STATE_PATH = resolveStatePath();
 const TOMBSTONE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_SCROBBLE_ENTRIES = 1000;
 
@@ -962,6 +981,19 @@ function syncFromRenderer(payload) {
   let changed = false;
   const now = Date.now();
 
+  // A client that has not loaded its library yet (a fresh install, a dev run
+  // with its own storage) pushes an empty collection. Reading that as "every
+  // favourite and playlist was deleted" tombstoned the whole store, and the
+  // renderer then adopted the empty snapshot and pushed it to the account.
+  // Deleting therefore needs either something in the push or a renderer that
+  // says it loaded its collection (`ready`).
+  const stored = Object.values(state.starred).some((entry) => entry && !entry.deleted)
+    || Object.values(state.playlists).some((pl) => pl && !pl.deleted);
+  const authoritative = favorites.length > 0
+    || incomingPlaylists.length > 0
+    || input.ready === true
+    || !stored;
+
   // Playlist songs added on the PC must exist here before entries are built,
   // otherwise they have no song id and the phone shows an empty playlist.
   adoptPlaylistTracks(incomingPlaylists);
@@ -991,18 +1023,20 @@ function syncFromRenderer(payload) {
   }
 
   // Keys the PC used to send and no longer does were unstarred on the desktop.
-  const previousFavorites = new Set(state.pc.favoriteKeys || []);
-  for (const key of previousFavorites) {
-    if (incoming.has(key)) continue;
-    const existing = state.starred[key];
-    if (!existing || existing.deleted) continue;
-    state.starred[key] = Object.assign({}, existing, {
-      deleted: true,
-      starredAt: now,
-    });
-    changed = true;
+  if (authoritative) {
+    const previousFavorites = new Set(state.pc.favoriteKeys || []);
+    for (const key of previousFavorites) {
+      if (incoming.has(key)) continue;
+      const existing = state.starred[key];
+      if (!existing || existing.deleted) continue;
+      state.starred[key] = Object.assign({}, existing, {
+        deleted: true,
+        starredAt: now,
+      });
+      changed = true;
+    }
+    state.pc.favoriteKeys = Array.from(incoming.keys());
   }
-  state.pc.favoriteKeys = Array.from(incoming.keys());
 
   // ---- playlists ----
   const incomingPls = new Map();
@@ -1049,22 +1083,24 @@ function syncFromRenderer(payload) {
     }
   }
 
-  const previousPlaylistIds = new Set(state.pc.playlistIds || []);
-  for (const id of previousPlaylistIds) {
-    if (incomingPls.has(id)) continue;
-    const existing = state.playlists[id];
-    if (!existing || existing.deleted) continue;
-    state.playlists[id] = Object.assign({}, existing, {
-      deleted: true,
-      changedAt: now,
-      songs: [],
-    });
-    changed = true;
-  }
+  if (authoritative) {
+    const previousPlaylistIds = new Set(state.pc.playlistIds || []);
+    for (const id of previousPlaylistIds) {
+      if (incomingPls.has(id)) continue;
+      const existing = state.playlists[id];
+      if (!existing || existing.deleted) continue;
+      state.playlists[id] = Object.assign({}, existing, {
+        deleted: true,
+        changedAt: now,
+        songs: [],
+      });
+      changed = true;
+    }
 
-  state.pc.playlistIds = Array.from(incomingPls.keys());
-  state.pc.playlistHashes = {};
-  for (const [id, entry] of incomingPls) state.pc.playlistHashes[id] = entry.fingerprint;
+    state.pc.playlistIds = Array.from(incomingPls.keys());
+    state.pc.playlistHashes = {};
+    for (const [id, entry] of incomingPls) state.pc.playlistHashes[id] = entry.fingerprint;
+  }
 
   prune();
   // The renderer only adopts the returned collection when `changed` is set,
@@ -1081,6 +1117,9 @@ function syncFromRenderer(payload) {
     state.pc.rendererHash = snapshotHash;
     changed = true;
   }
+  // Tell a client that arrived with nothing loaded what this store really
+  // holds, so it adopts the collection instead of staying empty.
+  if (!authoritative && stored) changed = true;
 
   // ---- play history (PC → phone) ----
   // The renderer keeps its last 100 plays with a timestamp. Each new playedAt

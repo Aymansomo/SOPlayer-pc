@@ -19105,6 +19105,9 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     const exists = state.favorites.some(f => isSameTrack(f, track));
     
     if (exists) {
+      // Unliking is deliberate, so it vouches for the cloud purge that an
+      // emptied favourite list otherwise cannot prove (see mergeCollections).
+      window.__riffCloudPurgeAllowed = true;
       state.favorites = state.favorites.filter(f => !isSameTrack(f, track));
     } else {
       state.favorites.unshift(stampAddedAt(track));
@@ -30203,7 +30206,16 @@ function bindCoverHoldZoom(wrapEl) {
     }
 
     function applyPhoneCollection(collection) {
-      if (!collection || !Array.isArray(collection.favorites) || !Array.isArray(collection.playlists)) return;
+      if (!collection || !Array.isArray(collection.favorites) || !Array.isArray(collection.playlists)) return false;
+
+      // The phone store is a mirror, not the owner. A snapshot that lost the
+      // whole collection means the other side is behind (wiped file, a client
+      // that pushed before it loaded), so keep this PC's copy and push it again
+      // instead of emptying the library and then the account.
+      if ((!collection.favorites.length && (state.favorites || []).length) ||
+          (!collection.playlists.length && (state.playlists || []).length)) {
+        return false;
+      }
 
       const existingFavs = new Map();
       for (const track of state.favorites || []) {
@@ -30264,6 +30276,7 @@ function bindCoverHoldZoom(wrapEl) {
           renderFavoritesView();
         }
       } catch (_) {}
+      return true;
     }
 
     // The phone only needs the identity of a played track, not the whole object.
@@ -30352,13 +30365,18 @@ function bindCoverHoldZoom(wrapEl) {
 
     let collectionSignature = '';
     let syncing = false;
+    // Set once this renderer has held a real collection. Only then may an empty
+    // push count as "the user deleted everything" on the phone side.
+    let collectionLoaded = false;
     function syncNow() {
       if (syncing) return Promise.resolve();
       const signature = phoneCollectionSignature();
       const full = signature !== collectionSignature;
+      if ((state.favorites || []).length || (state.playlists || []).length) collectionLoaded = true;
       const payload = full
         ? {
           signature,
+          ready: collectionLoaded,
           favorites: state.favorites || [],
           playlists: state.playlists || [],
           history: (state.history || []).slice(0, 100).map(slimPhoneTrack).filter(Boolean),
@@ -30372,7 +30390,10 @@ function bindCoverHoldZoom(wrapEl) {
         if (!res || !res.changed || !res.collection) return;
         // Adopting the phone's state changes local state, so the next tick is a
         // full push again and the two sides settle.
-        applyPhoneCollection(res.collection);
+        if (applyPhoneCollection(res.collection) === false) {
+          collectionSignature = '';
+          setTimeout(syncNow, 2000);
+        }
       }).catch(() => { syncing = false; });
     }
 
@@ -30526,21 +30547,21 @@ function bindCoverHoldZoom(wrapEl) {
       });
       localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists));
 
-      const favoriteByIdentity = new Map();
-      for (const track of nextFavorites) {
-        const key = cloudTrackKey(track);
-        if (key) favoriteByIdentity.set(key, track);
+      // An account that comes back with no likes while this PC still has some
+      // is the shape of a wipe, not of a user unliking everything: unliking
+      // happens here first, so the local list is already empty by then.
+      if (nextFavorites.length || !(state.favorites || []).length) {
+        const existingFavs = new Map();
+        for (const track of state.favorites || []) {
+          const key = cloudTrackKey(track);
+          if (key) existingFavs.set(key, track);
+        }
+        state.favorites = nextFavorites.map((track) => {
+          const key = cloudTrackKey(track);
+          return (key && existingFavs.get(key)) || track;
+        });
+        localStorage.setItem('devsize_favorites', JSON.stringify(state.favorites));
       }
-      const existingFavs = new Map();
-      for (const track of state.favorites || []) {
-        const key = cloudTrackKey(track);
-        if (key) existingFavs.set(key, track);
-      }
-      state.favorites = nextFavorites.map((track) => {
-        const key = cloudTrackKey(track);
-        return (key && existingFavs.get(key)) || track;
-      });
-      localStorage.setItem('devsize_favorites', JSON.stringify(state.favorites));
 
       if (state.currentPlaylistId) {
         state.currentPlaylist = state.playlists.find((pl) => pl.id === state.currentPlaylistId) || state.currentPlaylist;
@@ -30583,6 +30604,8 @@ function bindCoverHoldZoom(wrapEl) {
         }
         applyCloudCollection(res);
         lastApplied = cloudSignature();
+        // The vouch covers one push only: the next purge needs its own reason.
+        window.__riffCloudPurgeAllowed = false;
         refreshStatus();
         return true;
       }).catch((err) => {

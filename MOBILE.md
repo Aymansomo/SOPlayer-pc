@@ -230,6 +230,11 @@ up in Riff on the PC, and what you star or create in Riff shows up in Navic.
   back into Riff.
 - Unstarring on either side removes the star on the other side — deletions are
   remembered so they cannot reappear on the next sync.
+- A sync cannot empty them by accident: a push that carries nothing (a fresh
+  install, a run of Riff that has not loaded its collection yet) is not read as
+  "everything was deleted", and if the phone side ever answers with no likes or
+  no playlists, Riff keeps its own copy and pushes it again instead of adopting
+  the empty list.
 - Play counts are recorded from Navic's scrobbles (`getAlbumList2?type=frequent`
   is ordered by plays).
 - Playlists show a 2×2 cover made from the artwork of their first four songs,
