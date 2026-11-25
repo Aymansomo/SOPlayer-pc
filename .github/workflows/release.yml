@@ -46,4 +46,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx electron-builder ${{ matrix.flag }} --publish always
+        run: |
+          set -o pipefail
+          npx electron-builder ${{ matrix.flag }} --publish always 2>&1 | tee build.log
+      - name: Keep the build log on failure
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" build.log --clobber || true
