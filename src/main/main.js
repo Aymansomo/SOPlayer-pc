@@ -81,6 +81,7 @@ const { getSystemAudioOutputInfo } = require('../shared/audio-output');
 const { log, tail, LOG_DIR } = require('../shared/logger');
 const logger = { log, tail, LOG_DIR, error: (msg, err) => log('ERROR', `${msg}: ${err && err.message ? err.message : err}`) };
 const mobile = require('../server/mobile');
+const { writeFileAtomic } = require('../server/mobile/atomic-write');
 const account = require('./account');
 
 try {
@@ -1967,10 +1968,14 @@ function runGUI() {
         }
 
         fs.mkdirSync(DATA_DIR, { recursive: true });
-        const tempFile = `${YT_COOKIES_FILE}.${process.pid}.tmp`;
-        await fs.promises.writeFile(tempFile, `${lines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
-        await fs.promises.rm(YT_COOKIES_FILE, { force: true });
-        await fs.promises.rename(tempFile, YT_COOKIES_FILE);
+        // Windows answers the replace with EBUSY while Defender, the search
+        // indexer or a running yt-dlp still holds the file that was just
+        // written (the same reason mobile-*.json uses writeFileAtomic). Retry,
+        // then fall back to writing in place, so a short lock cannot make the
+        // whole sign-in fail with "EBUSY: resource busy or locked, rename".
+        const writeErr = writeFileAtomic(YT_COOKIES_FILE, `${lines.join('\n')}\n`, 'utf8');
+        if (writeErr) throw writeErr;
+        try { fs.chmodSync(YT_COOKIES_FILE, 0o600); } catch (_) {}
         try { fs.unlinkSync(YT_LOGOUT_FLAG); } catch (_) {}
 
         if (!hasValidYtCookiesFile()) {
